@@ -1,0 +1,58 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: build + test (macOS 14)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Resolve dependencies
+        run: swift package resolve
+
+      - name: Build (debug)
+        run: swift build
+
+      - name: Tests
+        run: swift test --parallel
+
+      - name: Build (release)
+        run: swift build -c release
+
+      - name: Verify executable runs
+        run: |
+          ls -la .build/release/agent-notch
+          # The app needs a display to fully boot; this just verifies the binary
+          # is not broken at link time and parses --help (if/when we add CLI flags).
+          file .build/release/agent-notch | grep -q "Mach-O 64-bit executable"
+
+  lint-meta:
+    name: meta files present
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Required files exist
+        run: |
+          test -f README.md
+          test -f LICENSE
+          test -f CHANGELOG.md
+          test -f CONTRIBUTING.md
+          test -f CODE_OF_CONDUCT.md
+          test -f SECURITY.md
+          test -f Package.swift
+          test -f .github/ISSUE_TEMPLATE/bug_report.yml
+          test -f .github/ISSUE_TEMPLATE/feature_request.yml
+          test -f .github/PULL_REQUEST_TEMPLATE.md
+          echo "All required meta files present"

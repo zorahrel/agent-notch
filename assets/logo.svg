@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a78bfa"/>
+      <stop offset="100%" stop-color="#ec4899"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="48" fill="#0f172a"/>
+  <!-- MacBook outline + dynamic notch silhouette -->
+  <g transform="translate(28,72)" fill="none" stroke="url(#g)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="0" y="0" width="200" height="112" rx="12"/>
+    <!-- The notch -->
+    <path d="M 70 0 Q 70 18 88 18 L 112 18 Q 130 18 130 0" fill="#0f172a" stroke="url(#g)"/>
+    <!-- HUD elements inside the screen -->
+    <circle cx="55" cy="50" r="6" fill="url(#g)" stroke="none"/>
+    <rect x="70" y="46" width="80" height="8" rx="3" fill="url(#g)" stroke="none" opacity="0.7"/>
+    <circle cx="55" cy="74" r="6" fill="url(#g)" stroke="none" opacity="0.6"/>
+    <rect x="70" y="70" width="60" height="8" rx="3" fill="url(#g)" stroke="none" opacity="0.5"/>
+    <circle cx="55" cy="98" r="6" fill="url(#g)" stroke="none" opacity="0.4"/>
+    <rect x="70" y="94" width="40" height="8" rx="3" fill="url(#g)" stroke="none" opacity="0.3"/>
+  </g>
+  <text x="128" y="216" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="20" font-weight="600" fill="#e2e8f0" text-anchor="middle">agent-notch</text>
+</svg>

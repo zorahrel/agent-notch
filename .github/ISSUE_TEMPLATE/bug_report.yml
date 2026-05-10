@@ -1,0 +1,77 @@
+name: Bug report
+description: Something doesn't work as documented
+title: "[bug] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. The more reproducible details you can include, the faster it gets fixed.
+
+  - type: input
+    id: version
+    attributes:
+      label: agent-notch version
+      placeholder: "0.3.0 (or commit SHA)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      multiple: true
+      options:
+        - HUD rendering (sidebar, todo strip, peek, aura)
+        - SSE / event bus reconnect
+        - Voice / transcription
+        - Backend integration (HTTP endpoints, env-var config)
+        - Build / install (swift build, .app bundle)
+        - macOS sandbox / TCC prompts
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS + Node version
+      placeholder: "macOS 14.5 + Node 20.18.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      placeholder: |
+        I ran `agent-notch inject --pid 123 --text y` and got…
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. `git clone ... && swift build -c release`
+        2. Set `AGENT_NOTCH_BACKEND_URL=...`
+        3. Run `swift run agent-notch`
+        4. Hover the notch and observe…
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / stack trace
+      render: shell
