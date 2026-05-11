@@ -431,11 +431,21 @@ final class NotchController: ObservableObject {
         prefs.allowsContentJavaScript = true
         config.defaultWebpagePreferences = prefs
 
-        // Enable legacy file:// permissions — required for ES modules + fetch
-        // from `file://` origins (three.js loads chunks via dynamic import).
-        // These private KVC keys exist on preferences since macOS 10.x.
-        config.preferences.setValue(true, forKey: "developerExtrasEnabled")
-        config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
+        // We previously toggled two private KVC keys here:
+        //   - `developerExtrasEnabled` — superseded by the public
+        //     `WKWebView.isInspectable` (macOS 13.3+), set below.
+        //   - `allowFileAccessFromFileURLs` — only relevant when loading
+        //     `file://` content, and the code path that did that has been
+        //     removed: the orb is loaded over HTTP from
+        //     `NotchEndpoints.orbHTML`. Comments left in this file already
+        //     admitted the flag did not actually unblock ES-module imports.
+        //
+        // Setting unsupported KVC keys on `WKPreferences` raises
+        // NSInvalidArgumentException at runtime on macOS releases where the
+        // key has been removed, so we drop them entirely. Anyone who still
+        // needs a file:// build target should set the supported
+        // `WKWebViewConfiguration.limitsNavigationsToAppBoundDomains` and
+        // load via `loadFileURL(_:allowingReadAccessTo:)`.
 
         // Pipe console.* + window.onerror into the Swift side so we can see
         // exactly what the orb is doing even when DevTools isn't open.
@@ -527,7 +537,21 @@ final class NotchController: ObservableObject {
         self.bridge = coordinator
 
         let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 420, height: 540), configuration: config)
-        web.setValue(false, forKey: "drawsBackground")
+        // `setDrawsBackground:` is private SPI but still present on every
+        // shipping macOS as of 14/15. Guard with `responds(to:)` so we
+        // fall back silently if Apple ever removes it (the worst-case is
+        // an opaque white webview behind a transparent panel — not a
+        // crash). When Apple ships a public replacement we should switch.
+        let drawsBgSel = NSSelectorFromString("setDrawsBackground:")
+        if web.responds(to: drawsBgSel) {
+            web.setValue(false, forKey: "drawsBackground")
+        } else {
+            // Keep the layer transparent so the underlying notch panel
+            // shows through. Has no effect if the webview is opaque, but
+            // costs nothing.
+            web.wantsLayer = true
+            web.layer?.backgroundColor = .clear
+        }
         // Safari Web Inspector — on macOS 13.3+ this is the easy way to debug.
         if #available(macOS 13.3, *) {
             web.isInspectable = true
