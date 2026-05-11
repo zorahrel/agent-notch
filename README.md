@@ -45,16 +45,38 @@ It started as Phase 2 of an internal multi-channel router (Jarvis). Extracted be
 
 ## Install
 
-For now, build from source:
+Build a real `.app` bundle (Info.plist + TCC usage strings + ad-hoc
+codesign) and drop it into `/Applications`:
 
 ```bash
 git clone https://github.com/zorahrel/agent-notch.git
 cd agent-notch
-swift build -c release
-cp -r .build/release/agent-notch /Applications/agent-notch
+./scripts/build-app.sh --install
 ```
 
-A signed `.app` bundle + Homebrew Cask are on the v0.2 roadmap.
+The output lands at `dist/AgentNotch.app` (and at
+`/Applications/AgentNotch.app` when `--install` is passed). Double-
+click to launch, or:
+
+```bash
+open /Applications/AgentNotch.app
+```
+
+A Developer-ID-signed + notarized bundle and a Homebrew Cask are on
+the v0.2 release plan.
+
+### Old recipe (plain executable, no bundle)
+
+```bash
+swift build -c release
+cp .build/release/agent-notch /Applications/agent-notch
+```
+
+This still works but skips TCC usage strings, so the first
+Microphone / Speech-Recognition prompt won't show a friendly message
+and `LSUIElement` won't be set (the executable runs with a Dock
+icon). Use the `.app` recipe above for everything except quick
+development iteration.
 
 ## Configuration
 
