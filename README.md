@@ -45,38 +45,38 @@ It started as Phase 2 of an internal multi-channel router (Jarvis). Extracted be
 
 ## Install
 
-Build a real `.app` bundle (Info.plist + TCC usage strings + ad-hoc
-codesign) and drop it into `/Applications`:
+For now, build from source:
 
 ```bash
 git clone https://github.com/zorahrel/agent-notch.git
 cd agent-notch
-./scripts/build-app.sh --install
-```
-
-The output lands at `dist/AgentNotch.app` (and at
-`/Applications/AgentNotch.app` when `--install` is passed). Double-
-click to launch, or:
-
-```bash
-open /Applications/AgentNotch.app
-```
-
-A Developer-ID-signed + notarized bundle and a Homebrew Cask are on
-the v0.2 release plan.
-
-### Old recipe (plain executable, no bundle)
-
-```bash
 swift build -c release
-cp .build/release/agent-notch /Applications/agent-notch
+cp -r .build/release/agent-notch /Applications/agent-notch
 ```
 
-This still works but skips TCC usage strings, so the first
-Microphone / Speech-Recognition prompt won't show a friendly message
-and `LSUIElement` won't be set (the executable runs with a Dock
-icon). Use the `.app` recipe above for everything except quick
-development iteration.
+A signed `.app` bundle + Homebrew Cask are on the v0.2 roadmap.
+
+### Build a real `.app` bundle
+
+The plain-executable recipe above skips TCC usage strings, so the
+first Microphone / Speech-Recognition prompt has no friendly
+message, and `LSUIElement` is not set (the executable would show a
+Dock icon on launch). For distribution — or just a nicer first-run
+UX — use the bundler script:
+
+```bash
+./scripts/build-app.sh             # → dist/AgentNotch.app
+./scripts/build-app.sh --install   # also copies into /Applications
+```
+
+The script wraps the SwiftPM output into a proper
+`Contents/{MacOS,Resources}` layout, writes an `Info.plist` with
+`CFBundleIdentifier`, `LSMinimumSystemVersion`, `LSUIElement = true`,
+and friendly `NSMicrophoneUsageDescription` /
+`NSSpeechRecognitionUsageDescription` strings, then `codesign -`
+(ad-hoc) so the bundle launches locally without a Developer ID
+cert. Developer-ID signing + notarization is a separate flow that
+lands when the cert is in place.
 
 ## Configuration
 
