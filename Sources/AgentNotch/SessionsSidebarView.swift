@@ -39,6 +39,11 @@ public struct SessionsSidebarView: View {
                                 .fill(badgeColor(for: s.status))
                                 .frame(width: 6, height: 6)
                         }
+                        // VoiceOver: the two-circle badge is purely
+                        // decorative — the label below carries the
+                        // semantic state. Hide the badge from AT.
+                        .accessibilityHidden(true)
+
                         Text(s.repo)
                             .font(.caption)
                             .lineLimit(1)
@@ -51,12 +56,25 @@ public struct SessionsSidebarView: View {
                                 .foregroundColor(.orange)
                                 .font(.caption2)
                                 .help("Conflict with pid \(c)")
+                                .accessibilityLabel("Conflict with process \(c)")
                         }
                     }
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .contentShape(Rectangle())
                     .help(ProviderStyle.displayName(forProvider: s.provider))
+                    // Compose a single semantic line for VoiceOver users
+                    // instead of letting each child element be read in
+                    // sequence ("two-decimal-place pid number, repo,
+                    // image triangle"). Provider + repo + status reads
+                    // as one chunk, mirroring how the row is meant to
+                    // be scanned visually.
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(
+                        "\(ProviderStyle.displayName(forProvider: s.provider)) session for \(s.repo), \(humanReadableStatus(s.status)), process \(s.pid)"
+                    )
+                    .accessibilityHint("Activate to open the orchestrator dashboard for this session")
+                    .accessibilityAddTraits(.isButton)
                     .onTapGesture { openDashboardOrchestratorTab(pid: s.pid) }
                 }
             }
@@ -97,6 +115,21 @@ public struct SessionsSidebarView: View {
         case "working":             return .green
         case "idle":                return .gray
         default:                    return .gray
+        }
+    }
+
+    /// VoiceOver-friendly status string. The raw wire value
+    /// (`"awaiting_user_input"`) is fine in JSON but reads terribly out
+    /// loud; the human-readable form makes the row understandable
+    /// without sighted access to the colour-coded badge.
+    private func humanReadableStatus(_ status: String) -> String {
+        switch status {
+        case "awaiting_user_input": return "awaiting user input"
+        case "tool_pending":        return "tool call pending"
+        case "crashed":             return "crashed"
+        case "working":             return "working"
+        case "idle":                return "idle"
+        default:                    return status.replacingOccurrences(of: "_", with: " ")
         }
     }
 
