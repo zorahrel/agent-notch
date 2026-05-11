@@ -180,12 +180,18 @@ final class NotchEventBus {
             // Swift consumers get typed payloads. Failure → drop the event.
             if let raw = try? JSONSerialization.data(withJSONObject: d, options: []),
                let payload = try? JSONDecoder().decode(SessionsUpdatePayload.self, from: raw) {
+                if let v = payload.wireVersion, v > NotchWireVersion.maxSupported {
+                    NotchWireVersion.notePotentialFutureVersion(v, kind: "sessions:update")
+                }
                 lastSessionsPayload = payload
                 broadcastOrchestrator(.sessionsUpdate(payload))
             }
         case "todos:update":
             if let raw = try? JSONSerialization.data(withJSONObject: d, options: []),
                let payload = try? JSONDecoder().decode(TodosUpdatePayload.self, from: raw) {
+                if let v = payload.wireVersion, v > NotchWireVersion.maxSupported {
+                    NotchWireVersion.notePotentialFutureVersion(v, kind: "todos:update")
+                }
                 lastTodosPayload = payload
                 broadcastOrchestrator(.todosUpdate(payload))
             }
