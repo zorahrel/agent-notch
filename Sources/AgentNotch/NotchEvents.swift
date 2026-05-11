@@ -43,15 +43,22 @@ public struct SessionStatusEntry: Codable, Equatable {
 /// always present (cheap to construct router-side); `sessions` is the rich
 /// payload populated by the snapshot bridge — Swift consumers should prefer
 /// it when present and fall back to displaying the raw pids otherwise.
+///
+/// `wireVersion` is the optional schema-version marker — see
+/// `NotchWireVersion`. Missing field → treat as v1 (baseline). A value
+/// greater than `NotchWireVersion.maxSupported` triggers a warning log
+/// but decoding still proceeds optimistically.
 public struct SessionsUpdatePayload: Codable, Equatable {
     public let pids: [Int]
     public let ts: Int64
     public let sessions: [SessionStatusEntry]?
+    public let wireVersion: Int?
 
-    public init(pids: [Int], ts: Int64, sessions: [SessionStatusEntry]?) {
+    public init(pids: [Int], ts: Int64, sessions: [SessionStatusEntry]?, wireVersion: Int? = nil) {
         self.pids = pids
         self.ts = ts
         self.sessions = sessions
+        self.wireVersion = wireVersion
     }
 }
 
@@ -74,15 +81,20 @@ public struct TodoSummary: Codable, Equatable {
 
 /// Aggregated `todos:update` payload — `count` is the total open todos,
 /// `topThree` is the slice rendered by `TodoStripView`.
+///
+/// `wireVersion` is the optional schema-version marker — see
+/// `NotchWireVersion`. Same semantics as `SessionsUpdatePayload`.
 public struct TodosUpdatePayload: Codable, Equatable {
     public let count: Int
     public let ts: Int64
     public let topThree: [TodoSummary]?
+    public let wireVersion: Int?
 
-    public init(count: Int, ts: Int64, topThree: [TodoSummary]?) {
+    public init(count: Int, ts: Int64, topThree: [TodoSummary]?, wireVersion: Int? = nil) {
         self.count = count
         self.ts = ts
         self.topThree = topThree
+        self.wireVersion = wireVersion
     }
 }
 
@@ -132,9 +144,18 @@ extension NotchEvent: Decodable {
         switch type {
         case "sessions:update":
             let payload = try container.decode(SessionsUpdatePayload.self, forKey: .data)
+            // Note newer-than-supported wire versions but decode optimistically;
+            // JSONDecoder ignores unknown fields by default so a v2 payload
+            // with extra columns degrades gracefully into v1 shape.
+            if let v = payload.wireVersion, v > NotchWireVersion.maxSupported {
+                NotchWireVersion.notePotentialFutureVersion(v, kind: "sessions:update")
+            }
             self = .sessionsUpdate(payload)
         case "todos:update":
             let payload = try container.decode(TodosUpdatePayload.self, forKey: .data)
+            if let v = payload.wireVersion, v > NotchWireVersion.maxSupported {
+                NotchWireVersion.notePotentialFutureVersion(v, kind: "todos:update")
+            }
             self = .todosUpdate(payload)
         default:
             // Unknown future event types throw — callers in production code
