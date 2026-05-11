@@ -1793,42 +1793,4 @@ final class NotchController: ObservableObject {
 
 // MARK: - Notch logger
 
-/// Centralised logger for the Notch subsystem. Writes to stderr (visible in
-/// /tmp/jarvistray.log) and also mirrors into a dedicated file so we can
-/// grep for notch issues without scrolling the full tray log.
-final class NotchLogger {
-    static let shared = NotchLogger()
-    private let url: URL
-    private let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm:ss.SSS"
-        return f
-    }()
-    private let queue = DispatchQueue(label: "jarvis.notch.logger")
-
-    init() {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        self.url = home.appendingPathComponent(".claude/jarvis/logs/notch.log")
-        // Ensure parent dir exists.
-        let parent = url.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
-        // Truncate on launch so each boot has a fresh, tailable log.
-        try? "".write(to: url, atomically: true, encoding: .utf8)
-    }
-
-    func log(_ level: String, _ text: String) {
-        let ts = dateFormatter.string(from: Date())
-        let line = "\(ts) [\(level)] \(text)\n"
-        FileHandle.standardError.write(line.data(using: .utf8) ?? Data())
-        queue.async { [url] in
-            guard let data = line.data(using: .utf8) else { return }
-            if let handle = try? FileHandle(forWritingTo: url) {
-                handle.seekToEndOfFile()
-                handle.write(data)
-                try? handle.close()
-            } else {
-                try? data.write(to: url)
-            }
-        }
-    }
-}
+// NOTE: NotchLogger moved to NotchLogger.swift (os.Logger-backed in v0.2).
