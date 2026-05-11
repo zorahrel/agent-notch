@@ -78,6 +78,18 @@ final class VoiceTranscriber {
     private var recognizer: SFSpeechRecognizer?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
+
+    /// Audio-thread visible snapshot of the current recognition request.
+    /// `SFSpeechAudioBufferRecognitionRequest.append(_:)` is documented
+    /// thread-safe, so we hold a lock-protected reference here and let
+    /// `append(buffer:)` push samples directly from the AVAudioEngine tap
+    /// thread — no MainActor hop, no per-sample Task, no race on a nilled
+    /// request. The lock is uncontended in steady state (one writer on
+    /// start/stop, one reader per buffer). NSLock satisfies Sendable in
+    /// recent SDKs.
+    private let requestLock = NSLock()
+    nonisolated(unsafe) private var sharedRequest: SFSpeechAudioBufferRecognitionRequest?
+    nonisolated(unsafe) private var sharedAssistantSpeaking: Bool = false
     /// Soft barge-in: while the assistant's TTS is playing, we still
     /// receive audio buffers but skip feeding them to the recognizer so
     /// the user doesn't see the assistant transcribing its own voice. Toggled by
@@ -98,6 +110,9 @@ final class VoiceTranscriber {
 
     func setAssistantSpeaking(_ speaking: Bool) {
         assistantSpeaking = speaking
+        requestLock.lock()
+        sharedAssistantSpeaking = speaking
+        requestLock.unlock()
     }
 
     /// Begin a recognition session. The caller feeds audio buffers via
@@ -145,6 +160,12 @@ final class VoiceTranscriber {
         // each time (Apple-bug workaround above).
         req.contextualStrings = Self.techVocabulary
         self.request = req
+        // Publish to the audio-thread snapshot under the lock so the next
+        // append(buffer:) call sees the new request, not a stale one.
+        requestLock.lock()
+        sharedRequest = req
+        sharedAssistantSpeaking = false
+        requestLock.unlock()
 
         self.task = recognizer.recognitionTask(with: req) { [weak self] result, error in
             Task { @MainActor [weak self] in
@@ -174,16 +195,20 @@ final class VoiceTranscriber {
     /// recognizer expects — usually 16 kHz mono Float32, but the request is
     /// format-agnostic in practice; Apple's pipeline resamples internally.
     nonisolated func append(buffer: AVAudioPCMBuffer) {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            // Soft barge-in: drop buffers while the assistant is speaking
-            // so the recognizer doesn't transcribe the assistant's own TTS leaking
-            // into the mic. The user's voice during this window will be
-            // missed, which is actually desirable — the user can also stop
-            // the audio explicitly to "barge in".
-            if self.assistantSpeaking { return }
-            self.request?.append(buffer)
-        }
+        // Hot path: runs on the AVAudioEngine tap thread, ~50-100 Hz.
+        // Read the current request + barge-in flag under a tiny critical
+        // section, then call `append` directly. SFSpeechAudio-
+        // BufferRecognitionRequest.append(_:) is documented as
+        // thread-safe, so we don't need a MainActor hop. Skipping the hop
+        // avoids spawning a Task per buffer (which would starve the main
+        // actor) and eliminates the previous race where cancel() niled
+        // the request between the hop and the append call.
+        requestLock.lock()
+        let req = sharedRequest
+        let speaking = sharedAssistantSpeaking
+        requestLock.unlock()
+        if speaking { return }
+        req?.append(buffer)
     }
 
     /// End the current recognition session. Triggers a final result if Apple
@@ -192,6 +217,13 @@ final class VoiceTranscriber {
     @discardableResult
     func stop() -> String {
         request?.endAudio()
+        // Drop the audio-thread snapshot BEFORE niling the actor-isolated
+        // reference so a pending append on the engine thread doesn't push
+        // one last buffer into a request that has already had `endAudio`
+        // called on it.
+        requestLock.lock()
+        sharedRequest = nil
+        requestLock.unlock()
         // Don't cancel the task — that would suppress the final callback.
         // Apple emits the final shortly after endAudio() if it has bytes.
         request = nil
@@ -213,6 +245,11 @@ final class VoiceTranscriber {
         task = nil
         request?.endAudio()
         request = nil
+        // Mirror the actor-isolated nil into the audio-thread snapshot so
+        // append(buffer:) becomes a no-op immediately.
+        requestLock.lock()
+        sharedRequest = nil
+        requestLock.unlock()
         isRunning = false
     }
 

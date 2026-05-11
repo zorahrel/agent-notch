@@ -33,7 +33,11 @@ final class NotchEventBus {
     private var handler: ((NotchEvent) -> Void)?
     /// Plan 02-03 multi-subscriber list — every view that calls
     /// `subscribe { ... }` lands here; the bus fans every event out.
-    private var orchestratorSubscribers: [(NotchEvent) -> Void] = []
+    /// Keyed by monotonically increasing token so `unsubscribe` can
+    /// remove the exact closure without relying on (impossible) Swift
+    /// closure identity comparison.
+    private var orchestratorSubscribers: [Int: (NotchEvent) -> Void] = [:]
+    private var nextSubscriberToken: Int = 0
     private var backoff: TimeInterval = NotchTuning.sseBackoffStart
 
     /// Last `sessions:update` payload we've seen — replayed to new
@@ -53,7 +57,9 @@ final class NotchEventBus {
     /// without waiting for the next bridge tick.
     @discardableResult
     func subscribe(_ fn: @escaping (NotchEvent) -> Void) -> () -> Void {
-        orchestratorSubscribers.append(fn)
+        let token = nextSubscriberToken
+        nextSubscriberToken += 1
+        orchestratorSubscribers[token] = fn
         // Replay last-known snapshots so the view is not perma-empty until
         // the next router tick. Uses DispatchQueue.main.async to mimic
         // event-arrival semantics (subscribers expect an async hop).
@@ -64,19 +70,13 @@ final class NotchEventBus {
             DispatchQueue.main.async { fn(.todosUpdate(cached)) }
         }
         return { [weak self] in
-            guard let self else { return }
-            // Identity-based removal would need indexed handles; for the
-            // tiny fan-out (≤2 views) we just drop the matching closure
-            // by stripping the most-recent matching reference.
-            // SwiftUI views unsubscribe via the returned closure on
-            // onDisappear, so a strict identity match isn't required.
-            self.orchestratorSubscribers.removeAll(where: { _ in false })
-            // Note: closure identity is opaque in Swift; this no-op leaves
-            // stale subscribers in place but they are GC'd when the bus
-            // dispatches (the subscriber's owning view-state is captured
-            // weakly inside the views). For the bounded number of views
-            // in the notch HUD this is acceptable; replace with handle
-            // tokens if the subscriber count ever grows.
+            // Token-based removal — exact closure, no closure-identity
+            // hand-waving. Captured by value so the returned unsubscribe
+            // closure is idempotent and safe to call after the bus has
+            // been torn down.
+            Task { @MainActor in
+                self?.orchestratorSubscribers.removeValue(forKey: token)
+            }
         }
     }
 
@@ -130,7 +130,14 @@ final class NotchEventBus {
     }
 
     private func broadcastOrchestrator(_ event: NotchEvent) {
-        for s in orchestratorSubscribers {
+        // Materialise the closures into an array before dispatching so a
+        // re-entrant unsubscribe (a subscriber that mutates the dict
+        // mid-dispatch) doesn't invalidate the iterator. \`Array(...)\`
+        // forces an eager copy of the values; iterating
+        // \`orchestratorSubscribers.values\` directly would crash if a
+        // closure removed itself.
+        let subscribers = Array(orchestratorSubscribers.values)
+        for s in subscribers {
             s(event)
         }
     }
@@ -238,6 +245,7 @@ extension NotchEventBus {
     /// into the cache before SessionsSidebarTests asserts on pid=42).
     func resetForTesting() {
         orchestratorSubscribers.removeAll()
+        nextSubscriberToken = 0
         lastSessionsPayload = nil
         lastTodosPayload = nil
     }

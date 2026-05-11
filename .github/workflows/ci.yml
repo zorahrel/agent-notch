@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & Test (macOS 15, Swift 6.0)
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        # Xcode 16.2 ships Swift 6.0 — required by
+        # MrKai77/DynamicNotchKit 1.1.0, which declares
+        # `swift-tools-version: 6.0` and uses the SwiftUI `@Entry` macro.
+        # Xcode 15.4 / Swift 5.10 cannot resolve the dep at all.
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app
+
+      - name: Print toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Developer/Xcode/DerivedData
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-spm-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Resolve dependencies
+        run: swift package resolve
+
+      - name: Build (debug)
+        run: swift build -v
+
+      - name: Test
+        run: swift test -v --parallel
+
+  lint:
+    name: Lint (swift-format)
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app
+
+      - name: swift-format lint
+        # swift-format ships with Xcode 16. `--strict` exits non-zero on
+        # any finding, `--recursive` walks the Sources tree.
+        run: |
+          if command -v swift-format >/dev/null 2>&1; then
+            swift-format lint --recursive --strict Sources Tests || \
+              echo "::warning::swift-format reported issues (non-blocking)"
+          else
+            echo "::warning::swift-format not installed, skipping"
+          fi
