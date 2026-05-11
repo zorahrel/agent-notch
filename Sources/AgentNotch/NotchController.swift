@@ -1692,6 +1692,69 @@ final class NotchController: ObservableObject {
             Task { @MainActor in self?.peekPanel?.orderOut(nil) }
         }
     }
+
+    /// Cancel every background `Task` and detach every system-level event
+    /// monitor / window owned by this controller.
+    ///
+    /// `NotchController` is a singleton today, so `deinit` realistically
+    /// only runs in tests (or in a future build that drops the singleton).
+    /// We still cancel here so leaked controllers don't keep arming
+    /// timers, decay animations, hover graces, or speech engines after
+    /// they've fallen out of the SwiftUI lifecycle. The same routine is
+    /// exposed as `shutdown()` so the host app can call it from
+    /// `applicationWillTerminate` without waiting for ARC.
+    func shutdown() {
+        // Cancel every Task<Void, Never> slot we own.
+        pendingCollapseTask?.cancel(); pendingCollapseTask = nil
+        armingTask?.cancel(); armingTask = nil
+        hoverRecordGraceTask?.cancel(); hoverRecordGraceTask = nil
+        peekDismissTask?.cancel(); peekDismissTask = nil
+        for i in channelDecayTasks.indices {
+            channelDecayTasks[i]?.cancel()
+            channelDecayTasks[i] = nil
+        }
+
+        // Detach the global NSEvent monitor — addGlobalMonitorForEvents
+        // returns an opaque token that MUST be released via removeMonitor,
+        // otherwise the monitor stays armed for the lifetime of the process.
+        if let token = notchAreaClickMonitor {
+            NSEvent.removeMonitor(token)
+            notchAreaClickMonitor = nil
+        }
+
+        // Drop strong references — NotchEventTap's own `deinit` removes
+        // the CGEvent tap + run-loop source.
+        notchEventTap = nil
+        preloadWindow?.orderOut(nil)
+        preloadWindow = nil
+        peekPanel?.orderOut(nil)
+        peekPanel = nil
+    }
+
+    deinit {
+        // `deinit` cannot touch @MainActor-isolated state directly under
+        // Swift's strict concurrency model — hop onto the main actor and
+        // run the cleanup there. We capture each token by value (not
+        // self) so the Task body is deinit-safe.
+        let clickToken = notchAreaClickMonitor
+        let window = preloadWindow
+        let peek = peekPanel
+        let collapse = pendingCollapseTask
+        let arming = armingTask
+        let grace = hoverRecordGraceTask
+        let dismiss = peekDismissTask
+        let decays = channelDecayTasks
+        Task { @MainActor in
+            collapse?.cancel()
+            arming?.cancel()
+            grace?.cancel()
+            dismiss?.cancel()
+            for d in decays { d?.cancel() }
+            if let token = clickToken { NSEvent.removeMonitor(token) }
+            window?.orderOut(nil)
+            peek?.orderOut(nil)
+        }
+    }
 }
 
 // NOTE: MessagePeekView + NotchAuraView moved to NotchViews.swift
