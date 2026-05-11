@@ -86,6 +86,28 @@ cp -r .build/release/agent-notch /Applications/agent-notch
 
 A signed `.app` bundle + Homebrew Cask are on the v0.2 roadmap.
 
+### Build a real `.app` bundle
+
+The plain-executable recipe above skips TCC usage strings, so the
+first Microphone / Speech-Recognition prompt has no friendly
+message, and `LSUIElement` is not set (the executable would show a
+Dock icon on launch). For distribution — or just a nicer first-run
+UX — use the bundler script:
+
+```bash
+./scripts/build-app.sh             # → dist/AgentNotch.app
+./scripts/build-app.sh --install   # also copies into /Applications
+```
+
+The script wraps the SwiftPM output into a proper
+`Contents/{MacOS,Resources}` layout, writes an `Info.plist` with
+`CFBundleIdentifier`, `LSMinimumSystemVersion`, `LSUIElement = true`,
+and friendly `NSMicrophoneUsageDescription` /
+`NSSpeechRecognitionUsageDescription` strings, then `codesign -`
+(ad-hoc) so the bundle launches locally without a Developer ID
+cert. Developer-ID signing + notarization is a separate flow that
+lands when the cert is in place.
+
 ## Configuration
 
 The backend URL is read from a JSON config file:
