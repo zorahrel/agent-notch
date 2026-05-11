@@ -43,9 +43,39 @@ It started as Phase 2 of an internal multi-channel router (Jarvis). Extracted be
 - **Topics App** — future consumer. Will run its own backend.
 - **Standalone with `agent-conductor`** — planned for v0.2. The CLI in [`agent-conductor`](https://github.com/zorahrel/agent-conductor) will gain a `watch` subcommand that streams JSON-Lines on stdout; this app will spawn it as a subprocess. Zero HTTP, zero ports, zero config.
 
+## Try it in 30 seconds (no backend required)
+
+The fastest way to see the HUD running on your machine — no Jarvis
+Router, no agent-conductor, just a small Python mock backend that
+serves canned data so the sidebar + todo strip populate.
+
+```bash
+git clone https://github.com/zorahrel/agent-notch.git
+cd agent-notch
+./scripts/test-locale.sh
+```
+
+What the script does:
+
+1. Verifies your Xcode toolchain (Swift 6.0 required).
+2. Writes a `config.json` pointing at `http://127.0.0.1:3340`.
+3. Spawns `scripts/mock-backend.py` in the background, serving 2 fake
+   sessions, 3 fake todos, and a periodic `sessions:update` so the
+   sidebar shows live reactivity.
+4. Builds the SwiftPM target.
+5. Runs `agent-notch` in the foreground.
+
+Move your mouse to the top centre of the screen to expand the notch.
+Press <kbd>Ctrl</kbd>+<kbd>C</kbd> in the terminal to stop everything
+(the mock backend is killed via a shell `trap`).
+
+If a permissions dialog appears (Microphone / Speech Recognition /
+Accessibility), grant the request — without Accessibility, click-to-
+expand inside the notch cutout doesn't fire (hover still works).
+
 ## Install
 
-For now, build from source:
+For a release build placed in `/Applications`:
 
 ```bash
 git clone https://github.com/zorahrel/agent-notch.git
