@@ -21,6 +21,11 @@ import AVFoundation
 final class StreamingRecorder {
     private let engine = AVAudioEngine()
     private var file: AVAudioFile?
+
+    /// Surfaced when a buffered write fails. Cleared on every \`start()\`.
+    /// Callers can read this in \`stop()\` to decide whether to upload the
+    /// (now-truncated) file or discard.
+    private(set) var writeFailure: Error?
     private var converter: AVAudioConverter?
     /// Dedicated converter from the AEC-processed input format to a Float32
     /// 44.1kHz mono format that SFSpeechRecognizer accepts. The file write
@@ -108,6 +113,7 @@ final class StreamingRecorder {
         self.hadVoice = false
         self.didFireSilence = false
         self.lastLevelEmitAt = 0
+        self.writeFailure = nil
 
         let input = engine.inputNode
 
@@ -195,9 +201,25 @@ final class StreamingRecorder {
 
             // File write hops to the serial queue so we never touch
             // ExtAudioFile from the real-time audio IO thread. `buf` is
-            // kept alive by ARC inside the closure.
+            // kept alive by ARC inside the closure. If the write fails
+            // (disk full, sandbox revoke, codec mismatch) we surface it
+            // exactly once via `writeFailure` and stop attempting future
+            // writes so we don't spam the log at audio rate.
             self.writeQueue.async { [weak self] in
-                try? self?.file?.write(from: buf)
+                guard let self else { return }
+                guard let file = self.file else { return }
+                do {
+                    try file.write(from: buf)
+                } catch {
+                    self.file = nil  // stop writing to a dead handle
+                    NotchLogger.shared.log(
+                        "error",
+                        "[recorder] AVAudioFile.write failed: \(error.localizedDescription) — recording will be truncated"
+                    )
+                    Task { @MainActor [weak self] in
+                        self?.writeFailure = error
+                    }
+                }
             }
 
             // Dispatch level update + silence check back onto the main
@@ -231,7 +253,16 @@ final class StreamingRecorder {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
         }
-        writeQueue.sync {}
+        // Drain pending writes without blocking MainActor indefinitely.
+        // \`writeQueue.sync {}\` would deadlock the moment the queue is
+        // already executing a block that needs the main actor (we don't
+        // do that today, but the audit flagged it as a latent footgun).
+        // A bounded wait via DispatchGroup + wait(timeout:) gives us the
+        // same flush guarantee with a hard upper bound.
+        let drain = DispatchGroup()
+        drain.enter()
+        writeQueue.async { drain.leave() }
+        _ = drain.wait(timeout: .now() + .milliseconds(500))
         file = nil
         converter = nil
         onPartial = nil
