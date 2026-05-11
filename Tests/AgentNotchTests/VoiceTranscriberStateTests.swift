@@ -39,6 +39,12 @@ final class VoiceTranscriberStateTests: XCTestCase {
     /// any actor-isolated state. Calling it before `start()` (and from
     /// a background queue, to mimic the engine thread) must therefore
     /// be a silent no-op.
+    ///
+    /// `VoiceTranscriber.init` is `@MainActor`-isolated (the class is
+    /// `@MainActor`), so we construct on MainActor and then dispatch
+    /// to a background queue for the actual `append` — `append` is
+    /// `nonisolated` and is the surface we want to exercise.
+    @MainActor
     func testAppendBufferBeforeStartIsNoOp() {
         let t = VoiceTranscriber()
 
@@ -55,10 +61,16 @@ final class VoiceTranscriberStateTests: XCTestCase {
         buffer.frameLength = 128
 
         let exp = expectation(description: "append from background queue returned")
+        // VoiceTranscriber is @unchecked Sendable in practice (it
+        // guards mutation behind requestLock); the actual append
+        // path is nonisolated, so we capture the reference and call
+        // it from off-main without crossing an actor-isolated method.
+        nonisolated(unsafe) let captured = t
+        nonisolated(unsafe) let capturedBuffer = buffer
         DispatchQueue.global(qos: .userInitiated).async {
             // Call from a background thread to mirror the real engine
             // tap callback. Must not crash, must not assert.
-            t.append(buffer: buffer)
+            captured.append(buffer: capturedBuffer)
             exp.fulfill()
         }
         wait(for: [exp], timeout: 1.0)
