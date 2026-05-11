@@ -58,18 +58,34 @@ A signed `.app` bundle + Homebrew Cask are on the v0.2 roadmap.
 
 ## Configuration
 
-The app reads its backend URL from an environment variable.
+The backend URL is read from a JSON config file:
+
+```
+~/Library/Application Support/agent-notch/config.json
+```
+
+The file is created on first launch with the defaults below. Edit it
+in any text editor and relaunch — or call
+`AppConfigStore.shared.update { ... }` from code to pick up the new
+value live.
+
+```json
+{
+  "schemaVersion": 1,
+  "backendURL": "http://localhost:3340"
+}
+```
+
+For back-compat the env var still wins when set:
 
 ```bash
-# Default (matches Jarvis Router setup):
-AGENT_NOTCH_BACKEND_URL=http://localhost:3340
-
-# Topics App on a different port:
+# Override the file value (Wave 1 / scripted launches):
 AGENT_NOTCH_BACKEND_URL=http://localhost:4200
-
-# Remote backend (over an SSH tunnel, e.g.):
-AGENT_NOTCH_BACKEND_URL=http://127.0.0.1:9999
 ```
+
+If the config file is unreadable on startup, it is renamed to
+`config.broken.<timestamp>.json` and the app falls back to the
+built-in defaults — startup never crashes on a malformed file.
 
 The backend must expose:
 
