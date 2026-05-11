@@ -8,10 +8,11 @@
   Always-on HUD over the macOS dynamic notch + menu-bar surface. Shows which sessions are awaiting your input, which are stuck on a tool call, and your top open todos — without flipping windows.
 
   <p>
-    <a href="https://github.com/zorahrel/agent-notch/releases"><img src="https://img.shields.io/badge/version-0.1.0-a78bfa?style=flat-square" alt="version"/></a>
+    <a href="https://github.com/zorahrel/agent-notch/releases"><img src="https://img.shields.io/badge/version-0.2.0-a78bfa?style=flat-square" alt="version"/></a>
     <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square" alt="license"/></a>
     <a href="https://github.com/zorahrel/agent-notch/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/zorahrel/agent-notch/ci.yml?branch=main&label=ci&style=flat-square" alt="ci"/></a>
     <img src="https://img.shields.io/badge/tests-10%20green-22c55e?style=flat-square" alt="tests"/>
+    <img src="https://img.shields.io/badge/multi--provider-yes-a78bfa?style=flat-square" alt="multi-provider"/>
     <img src="https://img.shields.io/badge/swift-5.9+-f97316?style=flat-square" alt="swift"/>
     <img src="https://img.shields.io/badge/macOS-14+-0f172a?style=flat-square" alt="macos"/>
   </p>
@@ -23,7 +24,11 @@
 
 When you hover the notch, you get an expanded HUD with:
 
-- **Sessions sidebar (right peek)** — every live Claude Code session your machine is running. Coloured badge per refined status: `awaiting_user_input` / `tool_pending` / `crashed` / `working` / `idle`. Click → opens the orchestrator dashboard tab focused on that pid.
+- **Sessions sidebar (right peek)** — every live AI coding agent session your machine is running. Each row shows:
+  - **Outer ring colour** = provider (Claude orange-amber, Aider green, Cursor blue, ChatGPT teal-green, custom = grey)
+  - **Inner dot colour** = refined status (`awaiting_user_input` orange, `tool_pending` blue, `crashed` red, `working` green, `idle` grey)
+  - **Tooltip** = provider display name (e.g. "Claude Code")
+  - **Click** → opens the orchestrator dashboard tab focused on that pid
 - **Todo strip (thin row, top or bottom)** — top-3 open todos from your Apple Reminders list. Tap = mark complete. Long-press = reassign to a different session.
 - **Aura + Orb visualisations** — voice activity feedback (driven by SSE events).
 - **Live transcription bubble** — local on-device Apple speech recognition during voice input.

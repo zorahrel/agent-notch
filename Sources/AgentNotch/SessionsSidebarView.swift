@@ -29,9 +29,16 @@ public struct SessionsSidebarView: View {
             } else {
                 ForEach(sessions, id: \.pid) { s in
                     HStack(spacing: 6) {
-                        Circle()
-                            .fill(badgeColor(for: s.status))
-                            .frame(width: 8, height: 8)
+                        // Outer ring tinted by provider; inner dot by status.
+                        // Net effect: a glance shows BOTH provider and state.
+                        ZStack {
+                            Circle()
+                                .stroke(ProviderStyle.accent(forProvider: s.provider), lineWidth: 2)
+                                .frame(width: 10, height: 10)
+                            Circle()
+                                .fill(badgeColor(for: s.status))
+                                .frame(width: 6, height: 6)
+                        }
                         Text(s.repo)
                             .font(.caption)
                             .lineLimit(1)
@@ -49,6 +56,7 @@ public struct SessionsSidebarView: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .contentShape(Rectangle())
+                    .help(ProviderStyle.displayName(forProvider: s.provider))
                     .onTapGesture { openDashboardOrchestratorTab(pid: s.pid) }
                 }
             }

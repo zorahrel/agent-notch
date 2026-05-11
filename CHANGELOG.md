@@ -3,6 +3,19 @@
 All notable changes to `agent-notch` are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [SemVer](https://semver.org/).
 
+## [0.2.0] — 2026-05-11
+
+### Added
+
+- **Multi-provider awareness** — `SessionStatusEntry` now decodes an optional `provider` field. Backends running `agent-conductor` v0.4+ tag every session with `claude-code` / `aider` / `cursor-cli` / custom. Older backends omit the field, no behaviour change.
+- **`ProviderStyle.swift`** — central per-provider accent colour + display name. The sidebar uses it for a coloured outer ring around each status dot, so a glance shows BOTH provider and state.
+- **Sidebar tooltip** — hovering a session row now shows the provider's display name (e.g. "Claude Code", "Aider").
+
+### Notes
+
+- The `provider` field is OPTIONAL — agent-notch v0.2 is fully backward-compatible with v0.1 backends that don't emit it. Missing field → neutral grey ring.
+- Default provider colour palette: Claude orange-amber, Aider green, Cursor blue, ChatGPT teal-green. Customise by forking `ProviderStyle.swift`.
+
 ## [0.1.0] — 2026-05-11
 
 ### Added

@@ -12,20 +12,30 @@ enum NotchAgentState: String {
 
 // MARK: - Orchestrator payloads (Phase 2 Plan 02-03)
 
-/// Single session entry inside a `sessions:update` payload — mirrors the
-/// shape emitted by `router/src/notch/orchestrator-events.ts` after Plan
-/// 02-03's bridge wires `buildSnapshot()` into the bus.
+/// Single session entry inside a `sessions:update` payload. Mirrors the
+/// shape emitted by the backend's snapshot bridge.
+///
+/// The `provider` field is OPTIONAL — backends that haven't been updated for
+/// the multi-provider model just omit it, and the sidebar falls back to
+/// treating every session as the default (Claude Code). Backends running
+/// `agent-conductor` v0.4+ will set it to one of: `claude-code`, `aider`,
+/// `cursor-cli`, or a custom provider name.
 public struct SessionStatusEntry: Codable, Equatable {
     public let pid: Int
     public let repo: String
     public let status: String  // "awaiting_user_input" | "tool_pending" | "crashed" | "working" | "idle"
     public let conflict: Int?
+    /// Provider identifier (e.g. `"claude-code"`, `"aider"`, `"cursor-cli"`).
+    /// Drives badge colour in the sidebar; falls back to a neutral colour
+    /// if the field is missing (older backends).
+    public let provider: String?
 
-    public init(pid: Int, repo: String, status: String, conflict: Int?) {
+    public init(pid: Int, repo: String, status: String, conflict: Int?, provider: String? = nil) {
         self.pid = pid
         self.repo = repo
         self.status = status
         self.conflict = conflict
+        self.provider = provider
     }
 }
 
