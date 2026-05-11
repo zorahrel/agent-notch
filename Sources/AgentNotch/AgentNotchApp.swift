@@ -22,6 +22,17 @@ import Speech
 final class NotchAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+
+        // Surface where the on-disk config lives + which backend URL
+        // the process ended up using. Users following the README to
+        // change the backend port want a single log line telling them
+        // whether their edit landed.
+        let cfg = AppConfigStore.shared.config
+        NotchLogger.shared.log(
+            "info",
+            "[config] file=\(AppConfig.configFileURL.path) backend=\(cfg.backendURL) schema=\(cfg.schemaVersion)"
+        )
+
         // Trigger TCC prompts upfront so the first hover doesn't fail
         // silently. SFSpeechRecognizer + Microphone are needed for the
         // realtime Apple-on-device transcription that powers the live
