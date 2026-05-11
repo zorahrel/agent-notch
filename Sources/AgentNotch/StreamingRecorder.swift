@@ -207,16 +207,24 @@ final class StreamingRecorder {
             // writes so we don't spam the log at audio rate.
             self.writeQueue.async { [weak self] in
                 guard let self else { return }
+                // `file` is only ever mutated from MainActor in
+                // start()/stop(), so reading it from the serial writeQueue
+                // is a one-writer/one-reader pattern. Both events are
+                // already serialised by AVAudioEngine's start/stop being
+                // MainActor-isolated.
                 guard let file = self.file else { return }
                 do {
                     try file.write(from: buf)
                 } catch {
-                    self.file = nil  // stop writing to a dead handle
                     NotchLogger.shared.log(
                         "error",
                         "[recorder] AVAudioFile.write failed: \(error.localizedDescription) — recording will be truncated"
                     )
+                    // Mutate the AVAudioFile reference and the failure
+                    // marker on MainActor (the actor that owns them) so
+                    // we don't race with start()/stop().
                     Task { @MainActor [weak self] in
+                        self?.file = nil
                         self?.writeFailure = error
                     }
                 }
@@ -262,7 +270,12 @@ final class StreamingRecorder {
         let drain = DispatchGroup()
         drain.enter()
         writeQueue.async { drain.leave() }
-        _ = drain.wait(timeout: .now() + .milliseconds(500))
+        if drain.wait(timeout: .now() + .milliseconds(500)) == .timedOut {
+            NotchLogger.shared.log(
+                "warn",
+                "[recorder] write queue drain timed out (500 ms) — WAV may be truncated"
+            )
+        }
         file = nil
         converter = nil
         onPartial = nil

@@ -130,10 +130,14 @@ final class NotchEventBus {
     }
 
     private func broadcastOrchestrator(_ event: NotchEvent) {
-        // Snapshot the values into an array so a re-entrant unsubscribe
-        // (a subscriber that mutates the dict mid-dispatch) doesn't
-        // invalidate the iterator.
-        for s in orchestratorSubscribers.values {
+        // Materialise the closures into an array before dispatching so a
+        // re-entrant unsubscribe (a subscriber that mutates the dict
+        // mid-dispatch) doesn't invalidate the iterator. \`Array(...)\`
+        // forces an eager copy of the values; iterating
+        // \`orchestratorSubscribers.values\` directly would crash if a
+        // closure removed itself.
+        let subscribers = Array(orchestratorSubscribers.values)
+        for s in subscribers {
             s(event)
         }
     }
