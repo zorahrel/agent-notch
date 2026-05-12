@@ -4,18 +4,58 @@ import Foundation
 /// through `NotchEndpoints.host`. Single source so we don't grep 8 files when
 /// the backend URL changes (config file or env var).
 ///
-/// Wave 1 (this release): HTTP-only via `AGENT_NOTCH_BACKEND_URL` env var.
-/// Wave 2 (v0.2): pluggable `NotchBackend` protocol so consumers can spawn
+/// Wave 1 (initial release): HTTP-only via `AGENT_NOTCH_BACKEND_URL` env var.
+/// Wave 2 (v0.2 — this release): config file (`AppConfig`) is the primary
+/// source; the env var is kept as a back-compat override applied on top.
+/// Wave 3 (planned): pluggable `NotchBackend` protocol so consumers can spawn
 /// `agent-conductor watch` as a subprocess instead of running an HTTP server.
 public enum NotchEndpoints {
-    /// Base origin of the backend. Default `http://localhost:3340` matches
-    /// the default backend setup; override via `AGENT_NOTCH_BACKEND_URL` env
-    /// var for any other host (Topics App, agent-conductor standalone HTTP
-    /// server, dev port).
-    public static let host: String = {
-        ProcessInfo.processInfo.environment["AGENT_NOTCH_BACKEND_URL"]
-            ?? "http://localhost:3340"
-    }()
+    /// Base origin of the backend. Resolved once at process start from
+    /// `AppConfig.load()` — which reads
+    /// `~/Library/Application Support/agent-notch/config.json` and lets
+    /// `AGENT_NOTCH_BACKEND_URL` override the file value (Wave 1
+    /// back-compat). Default — `http://localhost:3340`.
+    ///
+    /// Snapshotted into a non-isolated `let` so URL builders can run
+    /// from any thread (the SSE delegate, the audio tap, background
+    /// URLSessions). To pick up a runtime config change call
+    /// `NotchEndpoints.refresh()` from MainActor after mutating
+    /// `AppConfigStore.shared`.
+    public static var host: String { hostBox.value }
+    private static let hostBox = HostBox(initial: AppConfig.load().backendURL)
+
+    /// Replace the cached backend host. Caller passes the new value
+    /// directly so we don't re-touch disk from arbitrary threads (which
+    /// would race with `AppConfigStore` writers and `AppConfig.load()`'s
+    /// own first-run write).
+    ///
+    /// Safe to call from any thread — the box is lock-protected.
+    public static func refresh(host newHost: String) {
+        hostBox.value = newHost
+    }
+
+    /// MainActor-isolated convenience: re-read from disk and update.
+    /// Use this when the user has hand-edited `config.json` and you
+    /// want to pick up the change without an `AppConfigStore.update`
+    /// call. Disk reads happen on MainActor so they never interleave
+    /// with `AppConfigStore`'s save path.
+    @MainActor
+    public static func reloadFromDisk() {
+        hostBox.value = AppConfig.load().backendURL
+    }
+
+    /// Thread-safe holder so `host` reads from any thread are well-
+    /// defined under Swift strict concurrency. NSLock satisfies
+    /// `Sendable`; we only ever hold it for a single pointer copy.
+    private final class HostBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: String
+        init(initial: String) { self.stored = initial }
+        var value: String {
+            get { lock.lock(); defer { lock.unlock() }; return stored }
+            set { lock.lock(); stored = newValue; lock.unlock() }
+        }
+    }
 
     // ─── Notch-specific (rendered HTML + IPC over SSE) ─────────────────────
     public static var orbHTML: URL { URL(string: "\(host)/notch/orb/notch.html")! }

@@ -43,9 +43,39 @@ It started as Phase 2 of an internal multi-channel router (Jarvis). Extracted be
 - **Topics App** — future consumer. Will run its own backend.
 - **Standalone with `agent-conductor`** — planned for v0.2. The CLI in [`agent-conductor`](https://github.com/zorahrel/agent-conductor) will gain a `watch` subcommand that streams JSON-Lines on stdout; this app will spawn it as a subprocess. Zero HTTP, zero ports, zero config.
 
+## Try it in 30 seconds (no backend required)
+
+The fastest way to see the HUD running on your machine — no Jarvis
+Router, no agent-conductor, just a small Python mock backend that
+serves canned data so the sidebar + todo strip populate.
+
+```bash
+git clone https://github.com/zorahrel/agent-notch.git
+cd agent-notch
+./scripts/test-locale.sh
+```
+
+What the script does:
+
+1. Verifies your Xcode toolchain (Swift 6.0 required).
+2. Writes a `config.json` pointing at `http://127.0.0.1:3340`.
+3. Spawns `scripts/mock-backend.py` in the background, serving 2 fake
+   sessions, 3 fake todos, and a periodic `sessions:update` so the
+   sidebar shows live reactivity.
+4. Builds the SwiftPM target.
+5. Runs `agent-notch` in the foreground.
+
+Move your mouse to the top centre of the screen to expand the notch.
+Press <kbd>Ctrl</kbd>+<kbd>C</kbd> in the terminal to stop everything
+(the mock backend is killed via a shell `trap`).
+
+If a permissions dialog appears (Microphone / Speech Recognition /
+Accessibility), grant the request — without Accessibility, click-to-
+expand inside the notch cutout doesn't fire (hover still works).
+
 ## Install
 
-For now, build from source:
+For a release build placed in `/Applications`:
 
 ```bash
 git clone https://github.com/zorahrel/agent-notch.git
@@ -56,20 +86,58 @@ cp -r .build/release/agent-notch /Applications/agent-notch
 
 A signed `.app` bundle + Homebrew Cask are on the v0.2 roadmap.
 
-## Configuration
+### Build a real `.app` bundle
 
-The app reads its backend URL from an environment variable.
+The plain-executable recipe above skips TCC usage strings, so the
+first Microphone / Speech-Recognition prompt has no friendly
+message, and `LSUIElement` is not set (the executable would show a
+Dock icon on launch). For distribution — or just a nicer first-run
+UX — use the bundler script:
 
 ```bash
-# Default (matches Jarvis Router setup):
-AGENT_NOTCH_BACKEND_URL=http://localhost:3340
-
-# Topics App on a different port:
-AGENT_NOTCH_BACKEND_URL=http://localhost:4200
-
-# Remote backend (over an SSH tunnel, e.g.):
-AGENT_NOTCH_BACKEND_URL=http://127.0.0.1:9999
+./scripts/build-app.sh             # → dist/AgentNotch.app
+./scripts/build-app.sh --install   # also copies into /Applications
 ```
+
+The script wraps the SwiftPM output into a proper
+`Contents/{MacOS,Resources}` layout, writes an `Info.plist` with
+`CFBundleIdentifier`, `LSMinimumSystemVersion`, `LSUIElement = true`,
+and friendly `NSMicrophoneUsageDescription` /
+`NSSpeechRecognitionUsageDescription` strings, then `codesign -`
+(ad-hoc) so the bundle launches locally without a Developer ID
+cert. Developer-ID signing + notarization is a separate flow that
+lands when the cert is in place.
+
+## Configuration
+
+The backend URL is read from a JSON config file:
+
+```
+~/Library/Application Support/agent-notch/config.json
+```
+
+The file is created on first launch with the defaults below. Edit it
+in any text editor and relaunch — or call
+`AppConfigStore.shared.update { ... }` from code to pick up the new
+value live.
+
+```json
+{
+  "schemaVersion": 1,
+  "backendURL": "http://localhost:3340"
+}
+```
+
+For back-compat the env var still wins when set:
+
+```bash
+# Override the file value (Wave 1 / scripted launches):
+AGENT_NOTCH_BACKEND_URL=http://localhost:4200
+```
+
+If the config file is unreadable on startup, it is renamed to
+`config.broken.<timestamp>.json` and the app falls back to the
+built-in defaults — startup never crashes on a malformed file.
 
 The backend must expose:
 

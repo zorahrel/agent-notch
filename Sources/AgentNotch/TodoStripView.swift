@@ -25,6 +25,19 @@ public struct TodoStripView: View {
             // even if the bus delivers a longer list.
             ForEach(Array(todos.prefix(3)), id: \.id) { t in
                 todoBadge(t)
+                    .contentShape(Rectangle())
+                    // Compose a single VoiceOver line — title + assigned
+                    // session — instead of letting the icon + title +
+                    // pid read as three separate elements.
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(accessibilityLabel(for: t))
+                    .accessibilityHint("Double-tap to mark complete. Use the Actions rotor to reassign.")
+                    .accessibilityAddTraits(.isButton)
+                    // VoiceOver users get the long-press equivalent
+                    // through the Actions rotor instead of a timed hold.
+                    .accessibilityAction(named: Text("Reassign to a session")) {
+                        pickerForTodoId = t.id
+                    }
                     .onTapGesture { complete(id: t.id) }
                     .onLongPressGesture(minimumDuration: 0.5) {
                         pickerForTodoId = t.id
@@ -34,6 +47,7 @@ public struct TodoStripView: View {
                 Text("No todos")
                     .font(.caption)
                     .foregroundColor(.secondary)
+                    .accessibilityLabel("No open todos")
             }
         }
         .padding(.horizontal, 8)
@@ -92,6 +106,18 @@ public struct TodoStripView: View {
         .contentShape(Rectangle())
     }
 
+    /// VoiceOver-friendly composite label for a todo row.
+    private func accessibilityLabel(for t: TodoSummary) -> String {
+        var parts: [String] = ["Todo: \(t.title)"]
+        if let pid = t.pid {
+            parts.append("assigned to process \(pid)")
+        }
+        if let phase = t.phase {
+            parts.append("phase \(phase)")
+        }
+        return parts.joined(separator: ", ")
+    }
+
     /// Production tap handler. Fires the POST against the default shared
     /// session — tests use `_test_complete(id:session:)` below to capture
     /// the request via MockURLProtocol.
@@ -134,10 +160,13 @@ private struct SessionPickerView: View {
         VStack(alignment: .leading) {
             Text("Reassign todo to session")
                 .font(.headline)
+                .accessibilityAddTraits(.isHeader)
             ForEach(pids, id: \.self) { pid in
                 Button("PID \(pid)") { onPicked(pid) }
+                    .accessibilityLabel("Reassign to process \(pid)")
             }
             Button("Cancel", role: .cancel) { onCancel() }
+                .accessibilityLabel("Cancel reassignment")
         }
         .padding()
         .task {

@@ -3,6 +3,38 @@
 All notable changes to `agent-notch` are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **`AppConfig` + `config.json`** — first-class persistent user
+  configuration at
+  `~/Library/Application Support/agent-notch/config.json`. The Wave 1
+  `AGENT_NOTCH_BACKEND_URL` env var is still honoured as an override on
+  top of the file value, so existing launchd setups keep working.
+  Corrupt config files are quarantined to
+  `config.broken.<timestamp>.json` so app startup is never blocked by a
+  bad JSON.
+- **`AppConfigStore`** — process-wide MainActor cache with `update`
+  and `reload` helpers. Mutations re-serialise the file and refresh
+  the URL cache used by `NotchEndpoints` without restarting the app.
+- **Schema version field** — `AppConfig.schemaVersion` lets future
+  builds detect old on-disk shapes and migrate or fall back to
+  defaults instead of crashing on a `JSONDecoder` mismatch.
+- **Tests (+5)** — `AppConfigTests` covers defaults, env-override
+  precedence, empty-env handling, Codable round-trip, and save / load.
+
+### Changed
+
+- `NotchEndpoints.host` is now a thread-safe lock-protected snapshot
+  (`HostBox`) instead of a `static let` captured at module load. URL
+  builders can run on any thread, including the SSE delegate and
+  audio callbacks. Live config changes pick up via
+  `NotchEndpoints.refresh()`.
+- `AgentNotchApp` logs the config file path + resolved backend URL +
+  schema version at launch so users editing `config.json` can confirm
+  their change was picked up.
+
 ## [0.2.0] — 2026-05-11
 
 ### Added
