@@ -22,6 +22,17 @@ final class StreamingRecorder {
     private let engine = AVAudioEngine()
     private var file: AVAudioFile?
 
+    /// Audio-thread-visible snapshot of `file`, protected by `fileLock`.
+    /// `AVAudioFile.write(from:)` is itself documented as thread-safe;
+    /// what wasn't safe under Swift 6 strict concurrency was reading
+    /// the MainActor-isolated `file` property from the writeQueue
+    /// closure. Holding a parallel lock-protected pointer eliminates
+    /// that cross-actor read. `start`/`stop` (MainActor) publish into
+    /// it under the lock; `writeQueue.async` (off-main) reads under
+    /// the same lock.
+    private let fileLock = NSLock()
+    nonisolated(unsafe) private var sharedFile: AVAudioFile?
+
     /// Surfaced when a buffered write fails. Cleared on every \`start()\`.
     /// Callers can read this in \`stop()\` to decide whether to upload the
     /// (now-truncated) file or discard.
@@ -167,7 +178,13 @@ final class StreamingRecorder {
         // write the tap buffer verbatim. Resampling to 16 kHz mono Int16
         // happens offline in `stop()` via `afconvert`, which is what the
         // whisper-cli pipeline expects anyway.
-        self.file = try AVAudioFile(forWriting: outputURL, settings: hwFormat.settings)
+        let newFile = try AVAudioFile(forWriting: outputURL, settings: hwFormat.settings)
+        self.file = newFile
+        // Publish into the audio-thread-visible snapshot under the
+        // lock so the next writeQueue.async block sees the new file.
+        fileLock.lock()
+        sharedFile = newFile
+        fileLock.unlock()
         self.converter = nil
 
         input.installTap(onBus: 0, bufferSize: 4096, format: hwFormat) { [weak self] buf, _ in
@@ -207,12 +224,15 @@ final class StreamingRecorder {
             // writes so we don't spam the log at audio rate.
             self.writeQueue.async { [weak self] in
                 guard let self else { return }
-                // `file` is only ever mutated from MainActor in
-                // start()/stop(), so reading it from the serial writeQueue
-                // is a one-writer/one-reader pattern. Both events are
-                // already serialised by AVAudioEngine's start/stop being
-                // MainActor-isolated.
-                guard let file = self.file else { return }
+                // Read the AVAudioFile under the lock — `sharedFile` is
+                // the parallel snapshot of `self.file` that
+                // start()/stop() maintain. This avoids reading the
+                // MainActor-isolated `self.file` from a non-actor
+                // closure, which Swift 6 flags as unsafe.
+                self.fileLock.lock()
+                let file = self.sharedFile
+                self.fileLock.unlock()
+                guard let file else { return }
                 do {
                     try file.write(from: buf)
                 } catch {
@@ -220,9 +240,14 @@ final class StreamingRecorder {
                         "error",
                         "[recorder] AVAudioFile.write failed: \(error.localizedDescription) — recording will be truncated"
                     )
-                    // Mutate the AVAudioFile reference and the failure
-                    // marker on MainActor (the actor that owns them) so
-                    // we don't race with start()/stop().
+                    // Stop attempting future writes immediately by
+                    // clearing the snapshot here (still on writeQueue,
+                    // under the lock). Mirror the nil into the
+                    // MainActor-isolated `file` from a Task so the
+                    // owning state stays consistent.
+                    self.fileLock.lock()
+                    self.sharedFile = nil
+                    self.fileLock.unlock()
                     Task { @MainActor [weak self] in
                         self?.file = nil
                         self?.writeFailure = error
@@ -276,6 +301,11 @@ final class StreamingRecorder {
                 "[recorder] write queue drain timed out (500 ms) — WAV may be truncated"
             )
         }
+        // Clear the audio-thread snapshot first so any pending writes
+        // become no-ops, then release the MainActor-owned handle.
+        fileLock.lock()
+        sharedFile = nil
+        fileLock.unlock()
         file = nil
         converter = nil
         onPartial = nil

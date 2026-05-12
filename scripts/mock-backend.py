@@ -143,6 +143,40 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
+        # Browser auto-fetches for favicon / apple-touch-icon. Return
+        # 204 (no content) instead of 404 so the mock log doesn't fill
+        # with red error lines every time a sidebar click opens the
+        # browser to our fake /orchestrator URL.
+        if path in (
+            "/favicon.ico",
+            "/apple-touch-icon.png",
+            "/apple-touch-icon-precomposed.png",
+        ):
+            return self._send_204()
+
+        # Anything that looks like the orchestrator dashboard route —
+        # we don't actually render a dashboard, but returning a small
+        # HTML stub beats a 404 page in the browser when the user
+        # clicks a sidebar session.
+        if path.startswith("/orchestrator"):
+            stub = (
+                "<!doctype html><html><head><meta charset=\"utf-8\">"
+                "<title>orchestrator (mock)</title>"
+                "<style>body{background:#0b0b0e;color:#cfcfd6;"
+                "font:14px/1.4 -apple-system,system-ui,sans-serif;"
+                "padding:32px;}b{color:#a78bfa;}</style></head>"
+                "<body><b>mock backend</b><br/>"
+                f"Would open orchestrator tab for path: <code>{path}</code><br/>"
+                "Wire up a real backend (e.g. Jarvis Router) to see "
+                "the actual dashboard here.</body></html>"
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(stub)))
+            self.end_headers()
+            self.wfile.write(stub)
+            return
+
         return self._send_json(404, {"error": "not found", "path": path})
 
     # ── POST / PATCH ───────────────────────────────────────────────────
@@ -215,19 +249,32 @@ class Handler(BaseHTTPRequestHandler):
                 "topThree": FAKE_TODOS,
             })
 
-            # Periodic heartbeat: every 5 s flip one session's status so
-            # the sidebar shows reactivity.
+            # Periodic heartbeat: every 5 s rotate session statuses
+            # AND emit a state.change / message.in so more of the HUD
+            # surface gets exercised (orb aura, peek bubble).
             flip = 0
+            states = ["idle", "thinking", "responding"]
+            statuses = ["working", "tool_pending", "awaiting_user_input"]
+            fake_messages = [
+                "Sto ragionando sul prossimo step...",
+                "Ho aperto il file e leggo il diff.",
+                "Devo confermare prima di procedere.",
+            ]
             while True:
                 time.sleep(5)
                 flip = (flip + 1) % 3
-                statuses = ["working", "tool_pending", "awaiting_user_input"]
                 FAKE_SESSIONS[0]["status"] = statuses[flip]
                 send("sessions:update", {
                     "pids": [s["pid"] for s in FAKE_SESSIONS],
                     "ts": int(time.time() * 1000),
                     "sessions": FAKE_SESSIONS,
                 })
+                # Rotate the high-level agent state — drives the orb's
+                # idle/thinking/responding visual.
+                send("state.change", {"state": states[flip]})
+                # Periodic incoming message so the peek bubble has
+                # something to show.
+                send("message.in", {"text": fake_messages[flip]})
         except (BrokenPipeError, ConnectionResetError):
             sys.stderr.write("[mock] SSE client disconnected\n")
 

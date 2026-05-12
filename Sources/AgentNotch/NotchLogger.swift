@@ -68,26 +68,49 @@ final class NotchLogger: @unchecked Sendable {
         let line = "\(ts) [\(level)] \(text)\n"
         FileHandle.standardError.write(Data(line.utf8))
 
-        // Unified logging dispatch by level.
+        // Privacy classification:
         //
-        // Privacy: we use `.auto`. The os.Logger default is `.private`,
-        // which redacts dynamic strings to `<private>` in release
-        // builds — useful for genuine secrets, painful for debugging
-        // (every error message becomes opaque in sysdiagnose).
-        // `.auto` keeps the data visible to the local Console.app but
-        // redacts it from sysdiagnose archives, which is the right
-        // default for "diagnostic but not necessarily safe to ship to
-        // Apple Feedback Assistant". Callers that KNOW the value is
-        // safe to share (build constants, version strings) can call
-        // `logPublic` explicitly. Callers carrying a real secret
-        // must redact at the callsite — never log tokens.
+        // - In DEBUG builds: `.public`. The developer is the user; the
+        //   data NEVER leaves the local machine; redacting it would
+        //   only make Console.app useless.
+        //
+        // - In RELEASE builds: `.auto`. Local Console.app still sees
+        //   the values when the developer profile is installed, but
+        //   sysdiagnose archives shipped to Apple Feedback Assistant
+        //   (or any third party) get every dynamic string redacted to
+        //   `<private>`. This is the "diagnostic-but-not-shippable"
+        //   default that Apple's own apps use.
+        //
+        // Bare `.public` everywhere — our previous fix — left
+        // `<private>` markers in regular Console.app output on a
+        // release build because os.Logger refuses to inline `.public`
+        // interpolations unless the calling executable is the
+        // developer's. The `#if DEBUG` flip captures the intent:
+        // visible to me when I'm hacking, redacted to anyone who pulls
+        // a sysdiagnose.
+        #if DEBUG
+        switch level.lowercased() {
+        case "debug":
+            logger.debug("\(text, privacy: .public)")
+        case "info":
+            logger.info("\(text, privacy: .public)")
+        case "warn", "warning":
+            logger.notice("\(text, privacy: .public)")
+        case "error":
+            logger.error("\(text, privacy: .public)")
+        case "fault":
+            logger.fault("\(text, privacy: .public)")
+        default:
+            logger.log("\(text, privacy: .public)")
+        }
+        #else
         switch level.lowercased() {
         case "debug":
             logger.debug("\(text, privacy: .auto)")
         case "info":
             logger.info("\(text, privacy: .auto)")
         case "warn", "warning":
-            logger.notice("\(text, privacy: .auto)")  // os.Logger uses `notice` as the warning tier
+            logger.notice("\(text, privacy: .auto)")
         case "error":
             logger.error("\(text, privacy: .auto)")
         case "fault":
@@ -95,6 +118,7 @@ final class NotchLogger: @unchecked Sendable {
         default:
             logger.log("\(text, privacy: .auto)")
         }
+        #endif
     }
 
     /// Explicitly mark a line as safe to ship to Apple in a
