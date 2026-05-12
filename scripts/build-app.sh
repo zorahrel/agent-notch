@@ -18,8 +18,17 @@
 #
 #   ./scripts/build-app.sh
 #   ./scripts/build-app.sh --output dist/AgentNotch.app
-#   ./scripts/build-app.sh --install              # also copy into /Applications
-#   ./scripts/build-app.sh --version 0.2.1        # override Info.plist version
+#   ./scripts/build-app.sh --install                       # also copy into /Applications
+#   ./scripts/build-app.sh --version 0.2.1                 # override Info.plist version
+#   ./scripts/build-app.sh --display-name JarvisNotch \    # override CFBundleName / DisplayName
+#                          --executable-name JarvisNotch   # override binary file + CFBundleExecutable
+#
+# Why the *-name overrides exist: downstream consumers (e.g. a host menu-bar
+# supervisor that pgrep-x's the helper) sometimes need a specific process
+# name and visible app name without forking the bundle layout. Without these
+# flags consumers had to mv the binary + PlistBuddy-overwrite the keys after
+# the script ran, which duplicated codesign work (any post-build mutation
+# invalidates the ad-hoc signature done at line ~140).
 
 set -euo pipefail
 
@@ -29,14 +38,17 @@ OUTPUT="dist/AgentNotch.app"
 VERSION="0.2.0"
 BUNDLE_ID="io.armonia.agent-notch"
 DISPLAY_NAME="agent-notch"
+EXECUTABLE_NAME="agent-notch"
 INSTALL=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --output)    OUTPUT="$2";  shift 2 ;;
-        --version)   VERSION="$2"; shift 2 ;;
-        --bundle-id) BUNDLE_ID="$2"; shift 2 ;;
-        --install)   INSTALL=1; shift ;;
+        --output)          OUTPUT="$2"; shift 2 ;;
+        --version)         VERSION="$2"; shift 2 ;;
+        --bundle-id)       BUNDLE_ID="$2"; shift 2 ;;
+        --display-name)    DISPLAY_NAME="$2"; shift 2 ;;
+        --executable-name) EXECUTABLE_NAME="$2"; shift 2 ;;
+        --install)         INSTALL=1; shift ;;
         -h|--help)
             sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
             exit 0
@@ -91,9 +103,11 @@ mkdir -p "$ABS_OUTPUT/Contents/MacOS"
 mkdir -p "$ABS_OUTPUT/Contents/Resources"
 
 # ─── Copy executable ────────────────────────────────────────────────────
+# Use $EXECUTABLE_NAME (not the SwiftPM product name) so a consumer's
+# pgrep / launch contract is satisfied without a second mv + re-sign pass.
 
-cp "$EXECUTABLE" "$ABS_OUTPUT/Contents/MacOS/agent-notch"
-chmod +x "$ABS_OUTPUT/Contents/MacOS/agent-notch"
+cp "$EXECUTABLE" "$ABS_OUTPUT/Contents/MacOS/$EXECUTABLE_NAME"
+chmod +x "$ABS_OUTPUT/Contents/MacOS/$EXECUTABLE_NAME"
 
 # ─── Copy resource bundle (Orb/ etc) ────────────────────────────────────
 
@@ -107,7 +121,7 @@ fi
 PLIST="$ABS_OUTPUT/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Clear dict" "$PLIST" >/dev/null
 /usr/libexec/PlistBuddy -c "Add :CFBundleDevelopmentRegion string en"               "$PLIST"
-/usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string agent-notch"             "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string $EXECUTABLE_NAME"        "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string $BUNDLE_ID"              "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :CFBundleInfoDictionaryVersion string 6.0"          "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :CFBundleName string $DISPLAY_NAME"                 "$PLIST"
@@ -130,6 +144,8 @@ PLIST="$ABS_OUTPUT/Contents/Info.plist"
 
 echo "[build-app] Info.plist written:"
 echo "    bundle-id    = $BUNDLE_ID"
+echo "    display-name = $DISPLAY_NAME"
+echo "    executable   = $EXECUTABLE_NAME"
 echo "    version      = $VERSION"
 echo "    LSUIElement  = true (accessory app, no Dock icon)"
 echo "    min macOS    = 14.0"
