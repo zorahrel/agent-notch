@@ -129,9 +129,19 @@ function dispatchEvent(event: NotchEvent, _opts: UseSSEOptions): void {
       break;
     }
     case "message.chunk": {
-      // Disabled in connectors/notch.ts as of 2026-05-01 — kept here so the
-      // wire format is forward-compatible if we re-enable streaming text.
-      store.appendChunk(event.data.text);
+      // INTENTIONALLY IGNORED.
+      //
+      // Jarvis still emits chunk deltas during SDK streaming, but
+      // processing them on the client races with the final
+      // `message.in` event: a late chunk arriving after finalize was
+      // creating a SECOND assistant bubble that mirrored the reply
+      // a second time the moment TTS started playing — the "echo"
+      // the user reported.
+      //
+      // Atomic mode: rely on `message.in` alone. When it arrives
+      // with no prior chunks, `finalizeAssistant` triggers the
+      // client-side word-by-word reveal so the bubble still "types"
+      // out at TTS-friendly cadence — no race, no duplicate.
       break;
     }
     case "voice.transcribed":
