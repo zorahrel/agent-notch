@@ -742,7 +742,15 @@ final class NotchController: ObservableObject {
             // preferred form; the callback-based variant is still
             // working but emits the "consider using asynchronous
             // alternative function" warning under strict concurrency.
-            let js = "document.documentElement.dataset.notchFocus = '\(mode.rawValue)';"
+            //
+            // Also emit the visibility:visible event so the orb's
+            // render loop wakes from its compact-mode low-power state
+            // (mirror of the `notch:visibility hidden` emitted in
+            // `compact()`).
+            let js = """
+            document.documentElement.dataset.notchFocus = '\(mode.rawValue)';
+            window.dispatchEvent(new CustomEvent('notch:visibility', { detail: { state: 'visible' } }));
+            """
             _ = try? await self.webView.evaluateJavaScript(js)
             await notch?.expand(on: screen)
             self.forceShowDynamicNotchPanel()
@@ -792,6 +800,18 @@ final class NotchController: ObservableObject {
         Task { @MainActor in
             let screen = targetScreen()
             NotchLogger.shared.log("info", "[state] compact screen=\(Int(screen.frame.width))x\(Int(screen.frame.height))")
+            // Hint the orb that it's offscreen so its three.js render
+            // loop can drop to a low-power tick (or pause entirely).
+            // The backend's orb listens for this via a CustomEvent;
+            // backends that don't listen get a no-op. Cuts the ~5%
+            // sustained CPU we measured to roughly zero while the
+            // notch is collapsed.
+            _ = try? await self.webView.evaluateJavaScript(
+                "window.dispatchEvent(new CustomEvent('notch:visibility', { detail: { state: 'hidden' } }))"
+            )
+            // Belt-and-braces: pause any <audio>/<video> elements the
+            // orb might have started. No effect when the orb has none.
+            await self.webView.pauseAllMediaPlayback()
             await notch?.compact(on: screen)
             self.forceShowDynamicNotchPanel()
             self.isExpanded = false
@@ -1431,11 +1451,21 @@ final class NotchController: ObservableObject {
                 try? await Task.sleep(for: .milliseconds(NotchTuning.channelDecayTickMs))
                 if Task.isCancelled { return }
                 guard let self else { return }
-                if self.channelLevels[targetIndex] <= 0 { return }
+                if self.channelLevels[targetIndex] <= 0 {
+                    // Drop the slot reference so the cancelled-but-not-
+                    // yet-released Task doesn't pin captured state.
+                    self.channelDecayTasks[targetIndex] = nil
+                    return
+                }
                 var decayed = self.channelLevels
                 decayed[targetIndex] = max(0, decayed[targetIndex] - NotchTuning.channelDecayStep)
                 self.channelLevels = decayed
             }
+            // Loop exited normally — slot is at floor, free the handle so
+            // a stale Task<Void, Never>? doesn't sit in the array after
+            // the level has reached zero. Avoids the "4 zombie decay
+            // tasks per process" pattern the diagnostic flagged.
+            self?.channelDecayTasks[targetIndex] = nil
         }
     }
 

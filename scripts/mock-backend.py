@@ -217,6 +217,35 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write(f"[mock] PATCH {self.path}: {self._read_body()!r}\n")
         return self._send_204()
 
+    # ── HEAD ───────────────────────────────────────────────────────────
+    #
+    # Sidebar click probes the orchestrator URL with HEAD before
+    # opening the browser. BaseHTTPRequestHandler's default do_HEAD
+    # returns 501, which the probe reads as "unreachable" → the
+    # click silently no-ops. Mirror do_GET's routing but return only
+    # status + headers (no body).
+    def do_HEAD(self) -> None:
+        path = self.path
+        if (
+            path in (
+                "/api/local-sessions",
+                "/api/notch/prefs",
+                "/favicon.ico",
+                "/apple-touch-icon.png",
+                "/apple-touch-icon-precomposed.png",
+            )
+            or path.startswith("/api/todos/")
+            or path.startswith("/notch/orb")
+            or path.startswith("/orchestrator")
+        ):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            return
+        self.send_response(404)
+        self.end_headers()
+
     # ── SSE stream ─────────────────────────────────────────────────────
 
     def _stream_sse(self) -> None:

@@ -5,6 +5,34 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Performance / hardening
+
+- **Pause the orb when the notch is compact.** Compact transitions
+  now dispatch a `notch:visibility` CustomEvent with
+  `state: 'hidden'` and call
+  `WKWebView.pauseAllMediaPlayback()`; expand mirrors the event with
+  `state: 'visible'`. Backends whose orb HTML listens for the event
+  can drop the three.js render loop to a low-power tick while the
+  notch is collapsed (the ~5 % sustained CPU we measured during the
+  post-merge test). Backends that don't listen get a no-op.
+- **Free decay-task handles when the channel reaches the floor.**
+  `NotchController.bumpChannel` now nils the `channelDecayTasks[i]`
+  slot both on early-exit (`level <= 0`) and on natural loop end,
+  so the four `Task<Void, Never>?` references don't pin captured
+  state across idle stretches.
+- **Validate the backend URL before swapping the host cache.**
+  `NotchEndpoints.refresh(host:)` now rejects empty strings,
+  unparseable URLs, and unsupported schemes; malformed candidates
+  are logged and ignored instead of being cached and later
+  force-unwrapped by per-endpoint accessors. `reloadFromDisk()` runs
+  the same validation.
+- **Warn when the env var silently wins over `config.json`.** A
+  leftover `launchctl setenv AGENT_NOTCH_BACKEND_URL` setting used
+  to override the file value without surfacing anything; the
+  applyingEnvironmentOverrides path now logs a clear warning when
+  the env value differs from the file value, pointing the user at
+  the resolution.
+
 ### Added
 
 - **`AppConfig` + `config.json`** — first-class persistent user
