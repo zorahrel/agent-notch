@@ -48,7 +48,16 @@ public final class HTTPBackend: NotchBackend, @unchecked Sendable {
         body.append("Content-Type: audio/wav\r\n\r\n".utf8data)
         body.append(data)
         body.append("\r\n--\(boundary)--\r\n".utf8data)
-        let voiceURL = URL(string: "\(NotchEndpoints.host)/api/notch/voice")!
+        // `NotchEndpoints.host` is user-controllable (config.json or env
+        // var). A malformed value (e.g. unescaped spaces, missing scheme,
+        // typo'd port) would force-unwrap to a runtime crash here.
+        // Surface it as a transport error instead so the controller can
+        // show a friendly Preferences-pane message rather than crashing.
+        guard let voiceURL = URL(string: "\(NotchEndpoints.host)/api/notch/voice") else {
+            throw NotchBackendError.unreachable(
+                reason: "invalid backend URL in config: \(NotchEndpoints.host)"
+            )
+        }
         let respData = try await post(
             voiceURL,
             body: body,

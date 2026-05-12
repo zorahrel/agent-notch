@@ -149,7 +149,13 @@ echo "[build-app] bundle ready at: $ABS_OUTPUT"
 # ─── Optional install into /Applications ────────────────────────────────
 
 if [[ "$INSTALL" -eq 1 ]]; then
-    DEST="/Applications/AgentNotch.app"
+    # Derive the install path from the OUTPUT basename so a custom
+    # --bundle-id / --output combination doesn't silently overwrite
+    # the default /Applications/AgentNotch.app belonging to a
+    # different build. e.g.
+    #   --output dist/AgentNotchDev.app  →  /Applications/AgentNotchDev.app
+    DEST_NAME="$(basename "$ABS_OUTPUT")"
+    DEST="/Applications/$DEST_NAME"
     echo "[build-app] installing to $DEST (you may be prompted for sudo)…"
     sudo rm -rf "$DEST"
     sudo cp -R "$ABS_OUTPUT" "$DEST"

@@ -69,19 +69,49 @@ final class NotchLogger: @unchecked Sendable {
         FileHandle.standardError.write(Data(line.utf8))
 
         // Unified logging dispatch by level.
+        //
+        // Privacy: we use `.auto`. The os.Logger default is `.private`,
+        // which redacts dynamic strings to `<private>` in release
+        // builds — useful for genuine secrets, painful for debugging
+        // (every error message becomes opaque in sysdiagnose).
+        // `.auto` keeps the data visible to the local Console.app but
+        // redacts it from sysdiagnose archives, which is the right
+        // default for "diagnostic but not necessarily safe to ship to
+        // Apple Feedback Assistant". Callers that KNOW the value is
+        // safe to share (build constants, version strings) can call
+        // `logPublic` explicitly. Callers carrying a real secret
+        // must redact at the callsite — never log tokens.
         switch level.lowercased() {
         case "debug":
-            logger.debug("\(text, privacy: .public)")
+            logger.debug("\(text, privacy: .auto)")
         case "info":
-            logger.info("\(text, privacy: .public)")
+            logger.info("\(text, privacy: .auto)")
         case "warn", "warning":
-            logger.notice("\(text, privacy: .public)")  // os.Logger uses `notice` as the warning tier
+            logger.notice("\(text, privacy: .auto)")  // os.Logger uses `notice` as the warning tier
         case "error":
-            logger.error("\(text, privacy: .public)")
+            logger.error("\(text, privacy: .auto)")
         case "fault":
-            logger.fault("\(text, privacy: .public)")
+            logger.fault("\(text, privacy: .auto)")
         default:
-            logger.log("\(text, privacy: .public)")
+            logger.log("\(text, privacy: .auto)")
+        }
+    }
+
+    /// Explicitly mark a line as safe to ship to Apple in a
+    /// sysdiagnose archive. Use for build-time constants, version
+    /// strings, and other values that contain no user data. Never
+    /// for paths under `$HOME`, never for transport URLs, never for
+    /// auth tokens.
+    func logPublic(_ level: String, _ text: String) {
+        let ts = dateFormatter.string(from: Date())
+        FileHandle.standardError.write(Data("\(ts) [\(level)] \(text)\n".utf8))
+        switch level.lowercased() {
+        case "debug": logger.debug("\(text, privacy: .public)")
+        case "info":  logger.info("\(text, privacy: .public)")
+        case "warn", "warning": logger.notice("\(text, privacy: .public)")
+        case "error": logger.error("\(text, privacy: .public)")
+        case "fault": logger.fault("\(text, privacy: .public)")
+        default:      logger.log("\(text, privacy: .public)")
         }
     }
 }

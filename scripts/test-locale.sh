@@ -63,6 +63,20 @@ fi
 CONFIG_DIR="$HOME/Library/Application Support/agent-notch"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 mkdir -p "$CONFIG_DIR"
+
+# Back up the user's existing config (if any) before we overwrite it so a
+# real installation isn't silently clobbered when someone runs the test
+# recipe on a machine that already had agent-notch configured.
+if [[ -f "$CONFIG_FILE" ]]; then
+    BACKUP_FILE="$CONFIG_FILE.test-locale.backup.$(date +%s)"
+    cp "$CONFIG_FILE" "$BACKUP_FILE"
+    echo "[test-locale] existing config backed up → $BACKUP_FILE"
+    # We'll restore it on exit so the previous installation is untouched.
+    RESTORE_CONFIG="$BACKUP_FILE"
+else
+    RESTORE_CONFIG=""
+fi
+
 cat >"$CONFIG_FILE" <<EOF
 {
   "schemaVersion": 1,
@@ -79,16 +93,28 @@ echo "[test-locale] mock backend log: $MOCK_LOG"
 python3 "$REPO_ROOT/scripts/mock-backend.py" --port "$PORT" >"$MOCK_LOG" 2>&1 &
 MOCK_PID=$!
 
+# The swift-run child is captured in NOTCH_PID; we never use `pkill -f
+# agent-notch` because it would also nuke a user-installed
+# /Applications/AgentNotch.app currently running in another window.
+NOTCH_PID=""
+
 cleanup() {
     echo ""
     echo "[test-locale] cleaning up..."
+    if [[ -n "$NOTCH_PID" ]] && kill -0 "$NOTCH_PID" 2>/dev/null; then
+        kill "$NOTCH_PID" 2>/dev/null || true
+        wait "$NOTCH_PID" 2>/dev/null || true
+    fi
     if kill -0 "$MOCK_PID" 2>/dev/null; then
         kill "$MOCK_PID" 2>/dev/null || true
         wait "$MOCK_PID" 2>/dev/null || true
     fi
-    # Best-effort: kill any orphan agent-notch process the build might
-    # have spawned and detached from us.
-    pkill -f "agent-notch" 2>/dev/null || true
+    # Restore the user's previous config (if there was one) so we
+    # don't leave the mock URL pointing at a dead port.
+    if [[ -n "$RESTORE_CONFIG" && -f "$RESTORE_CONFIG" ]]; then
+        cp "$RESTORE_CONFIG" "$CONFIG_FILE"
+        echo "[test-locale] restored original config from $RESTORE_CONFIG"
+    fi
     echo "[test-locale] done."
 }
 trap cleanup EXIT INT TERM
@@ -122,4 +148,10 @@ echo " - press Ctrl+C in THIS terminal to stop everything."
 echo "────────────────────────────────────────────────────────────────"
 echo ""
 
-swift run agent-notch
+# Run as a background child so we can capture its PID — needed for the
+# cleanup trap, which must NOT use `pkill -f agent-notch` (that would
+# also kill a user-installed /Applications/AgentNotch.app running in
+# another window).
+swift run agent-notch &
+NOTCH_PID=$!
+wait "$NOTCH_PID"

@@ -143,18 +143,27 @@ public final class AppConfigStore {
     /// the running process picks up the new value immediately. Also
     /// refreshes `NotchEndpoints.host` so subsequent URL builds use
     /// the new backend.
+    ///
+    /// MainActor-isolated by virtue of the enclosing class, so the
+    /// (mutate → save → refresh) sequence is atomic from any other
+    /// MainActor caller's perspective. `NotchEndpoints.refresh(host:)`
+    /// receives the already-resolved URL — no extra disk read.
     public func update(_ mutate: (inout AppConfig) -> Void) throws {
         var next = config
         mutate(&next)
+        // Apply env overrides AFTER the mutation so the URL we hand
+        // to NotchEndpoints matches what AppConfig.load() would return
+        // on next launch.
+        let resolved = next.applyingEnvironmentOverrides()
         config = next
         try next.save()
-        NotchEndpoints.refresh()
+        NotchEndpoints.refresh(host: resolved.backendURL)
     }
 
     /// Re-read the config from disk and re-apply env overrides. Useful
     /// after an external edit of `config.json`.
     public func reload() {
         config = AppConfig.load()
-        NotchEndpoints.refresh()
+        NotchEndpoints.refresh(host: config.backendURL)
     }
 }

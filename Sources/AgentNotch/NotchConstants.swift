@@ -24,10 +24,23 @@ public enum NotchEndpoints {
     public static var host: String { hostBox.value }
     private static let hostBox = HostBox(initial: AppConfig.load().backendURL)
 
-    /// Re-read the backend URL from `AppConfig.load()` and update the
-    /// process-wide cache. Call after editing `config.json` on disk or
-    /// after `AppConfigStore.shared.update(...)`.
-    public static func refresh() {
+    /// Replace the cached backend host. Caller passes the new value
+    /// directly so we don't re-touch disk from arbitrary threads (which
+    /// would race with `AppConfigStore` writers and `AppConfig.load()`'s
+    /// own first-run write).
+    ///
+    /// Safe to call from any thread — the box is lock-protected.
+    public static func refresh(host newHost: String) {
+        hostBox.value = newHost
+    }
+
+    /// MainActor-isolated convenience: re-read from disk and update.
+    /// Use this when the user has hand-edited `config.json` and you
+    /// want to pick up the change without an `AppConfigStore.update`
+    /// call. Disk reads happen on MainActor so they never interleave
+    /// with `AppConfigStore`'s save path.
+    @MainActor
+    public static func reloadFromDisk() {
         hostBox.value = AppConfig.load().backendURL
     }
 
