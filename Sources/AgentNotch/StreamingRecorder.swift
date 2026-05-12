@@ -62,7 +62,14 @@ final class StreamingRecorder {
     /// bene la frase o il pensiero"). Long pauses between thoughts are
     /// natural in dictation; auto-stop should be patient enough to
     /// survive them.
-    private let silenceSeconds: Double = 1.5
+    // Continuous silence needed to call `onSilenceDetected`. Was 1.5s
+    // on user feedback "non mi dà neanche il tempo di finire bene la
+    // frase", but the post-Jarvis test showed the opposite — 1.5s
+    // makes the LISTENING badge linger long after the user is done
+    // talking. 0.8s is a comfortable middle: long enough to survive a
+    // pause for breath, short enough that the UI promptly hands off
+    // to the WORKING / RESPONDING badge.
+    private let silenceSeconds: Double = 0.8
 
     private var silenceStart: TimeInterval = 0
     /// Toggled by NotchController via setAssistantSpeaking() while the assistant's

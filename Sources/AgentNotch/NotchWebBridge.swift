@@ -10,7 +10,29 @@ import WebKit
 /// Acts also as the WKNavigationDelegate so we can self-heal a dead web
 /// content process (`webViewWebContentProcessDidTerminate`) and log every
 /// nav transition for the orb-loading debug channel.
-final class NotchWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
+final class NotchWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate {
+
+    /// Deny every mic/camera/display capture request the WKWebView
+    /// makes. The orb's VAD library calls `getUserMedia({audio: true})`
+    /// at boot to fetch a stream; allowing it lets the WebView share
+    /// the same AVAudioSession as our Swift `StreamingRecorder`. On
+    /// macOS 26 that causes the session to downgrade to 1-channel
+    /// mono — which is what we saw in the logs (`ch=1` instead of the
+    /// built-in mic's native 3-channel layout), and which makes
+    /// SFSpeechRecognizer go silent. Denying here keeps the audio
+    /// session 100 % owned by Swift; VAD will fail in the orb
+    /// (already failing because of the threaded-wasm policy anyway),
+    /// but that visual nicety is independent of speech recognition.
+    func webView(
+        _ webView: WKWebView,
+        requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+        initiatedByFrame frame: WKFrameInfo,
+        type: WKMediaCaptureType,
+        decisionHandler: @escaping (WKPermissionDecision) -> Void
+    ) {
+        decisionHandler(.deny)
+    }
+
     let onCollapse: () -> Void
     let onLog: (String, String) -> Void
     let onVoiceStart: () -> Void
@@ -81,6 +103,15 @@ final class NotchWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDelega
                     }
                 } else {
                     NotchController.shared.assistantSpeakingResetTimer = nil
+                    // TTS finished → if we're in continuous-call mode
+                    // and the user is still hovering, re-arm the mic
+                    // now so they can reply without waiting for the
+                    // 1.2s post-silence gap. The startStreamingVoice
+                    // guard inside handles the "already running" case.
+                    if NotchController.shared.inContinuousCall {
+                        NotchLogger.shared.log("info", "[voice] post-TTS re-arm")
+                        NotchController.shared.rearmAfterTTS()
+                    }
                 }
             }
         case "voicePartial":
