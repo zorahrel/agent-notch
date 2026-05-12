@@ -128,10 +128,25 @@ for _ in 1 2 3 4 5 6; do
     sleep 0.5
 done
 
-# ─── Build ──────────────────────────────────────────────────────────────
+# ─── Build a real .app bundle ───────────────────────────────────────────
+#
+# Earlier versions of this script used `swift run agent-notch`, which
+# launches the plain Mach-O binary with no Info.plist. macOS TCC then
+# refuses to attribute Microphone / Speech-Recognition prompts and
+# SFSpeechRecognizer.requestAuthorization crashes the process with
+# "this app has crashed because it attempted to access privacy-
+# sensitive data without a usage description". Building the .app
+# bundle (with Info.plist carrying the TCC usage strings) sidesteps
+# that. Adds ~10 s on first run; subsequent runs reuse the cache.
 
-echo "[test-locale] building agent-notch (this is fast after the first run)..."
-swift build
+echo "[test-locale] building AgentNotch.app (this is fast after the first run)..."
+"$REPO_ROOT/scripts/build-app.sh" >/dev/null
+APP_BUNDLE="$REPO_ROOT/dist/AgentNotch.app"
+APP_BIN="$APP_BUNDLE/Contents/MacOS/agent-notch"
+if [[ ! -x "$APP_BIN" ]]; then
+    echo "❌ build-app.sh did not produce $APP_BIN" >&2
+    exit 1
+fi
 
 # ─── Run ────────────────────────────────────────────────────────────────
 
@@ -148,10 +163,11 @@ echo " - press Ctrl+C in THIS terminal to stop everything."
 echo "────────────────────────────────────────────────────────────────"
 echo ""
 
-# Run as a background child so we can capture its PID — needed for the
-# cleanup trap, which must NOT use `pkill -f agent-notch` (that would
-# also kill a user-installed /Applications/AgentNotch.app running in
-# another window).
-swift run agent-notch &
+# Launch the executable directly (not via `open`) so we keep the
+# parent-child relationship for the cleanup trap. `open AgentNotch.app`
+# would detach and we'd lose the PID; running Contents/MacOS/agent-notch
+# keeps stdout/stderr attached AND lands in the bundle context, so the
+# Info.plist TCC strings are honoured.
+"$APP_BIN" &
 NOTCH_PID=$!
 wait "$NOTCH_PID"

@@ -133,8 +133,40 @@ public struct SessionsSidebarView: View {
         }
     }
 
+    /// Open the orchestrator dashboard for a clicked session. Probes
+    /// the URL with a short HEAD request first — if the backend has
+    /// no `/orchestrator` route (true for the bundled mock backend
+    /// and for any consumer that hasn't wired a dashboard yet), we
+    /// log the failure and skip opening the system browser to a
+    /// 404 page. Avoids the "click does something inscrutable" UX.
     private func openDashboardOrchestratorTab(pid: Int) {
-        NSWorkspace.shared.open(NotchEndpoints.orchestratorWeb(pid: pid))
+        let url = NotchEndpoints.orchestratorWeb(pid: pid)
+        Task.detached(priority: .userInitiated) {
+            var req = URLRequest(url: url)
+            req.httpMethod = "HEAD"
+            req.timeoutInterval = 1.5
+            let alive: Bool
+            do {
+                let (_, response) = try await URLSession.shared.data(for: req)
+                if let http = response as? HTTPURLResponse, (200..<400).contains(http.statusCode) {
+                    alive = true
+                } else {
+                    alive = false
+                }
+            } catch {
+                alive = false
+            }
+            if alive {
+                await MainActor.run {
+                    _ = NSWorkspace.shared.open(url)
+                }
+            } else {
+                NotchLogger.shared.log(
+                    "info",
+                    "[sidebar] orchestrator URL \(url.absoluteString) not reachable — backend has no dashboard route, click ignored"
+                )
+            }
+        }
     }
 }
 

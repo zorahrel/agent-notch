@@ -738,8 +738,12 @@ final class NotchController: ObservableObject {
             NotchLogger.shared.log("info", "[state] expand focus=\(mode.rawValue) screen=\(Int(screen.frame.width))x\(Int(screen.frame.height))")
             self.focus = mode
             // Push focus hint into the orb so its layout reacts.
+            // WKWebView's async `evaluateJavaScript(_:)` is the Swift 6
+            // preferred form; the callback-based variant is still
+            // working but emits the "consider using asynchronous
+            // alternative function" warning under strict concurrency.
             let js = "document.documentElement.dataset.notchFocus = '\(mode.rawValue)';"
-            self.webView.evaluateJavaScript(js, completionHandler: nil)
+            _ = try? await self.webView.evaluateJavaScript(js)
             await notch?.expand(on: screen)
             self.forceShowDynamicNotchPanel()
             self.isExpanded = true

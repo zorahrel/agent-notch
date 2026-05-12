@@ -20,6 +20,8 @@ import Speech
 /// in Info.plist should do this too, but the SwiftUI scene lifecycle
 /// overrides it, so we force it programmatically.
 final class NotchAppDelegate: NSObject, NSApplicationDelegate {
+    private let launchedAt = Date()
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
@@ -31,6 +33,10 @@ final class NotchAppDelegate: NSObject, NSApplicationDelegate {
         NotchLogger.shared.log(
             "info",
             "[config] file=\(AppConfig.configFileURL.path) backend=\(cfg.backendURL) schema=\(cfg.schemaVersion)"
+        )
+        NotchLogger.shared.log(
+            "info",
+            "[lifecycle] launched pid=\(ProcessInfo.processInfo.processIdentifier) bundle=\(Bundle.main.bundleIdentifier ?? "(no bundle)")"
         )
 
         // Trigger TCC prompts upfront so the first hover doesn't fail
@@ -45,6 +51,23 @@ final class NotchAppDelegate: NSObject, NSApplicationDelegate {
         AVCaptureDevice.requestAccess(for: .audio) { granted in
             NotchLogger.shared.log("info", "[perm] mic=\(granted)")
         }
+    }
+
+    /// Log a single line on graceful exit so post-mortem debugging
+    /// can tell "quit cleanly after 4 min" apart from "crashed at 4
+    /// min". The runtime guarantees this fires for SIGTERM, Cmd+Q,
+    /// and `NSApp.terminate(_:)`; it does NOT fire on SIGKILL or
+    /// fatal crash (use the .ips report for those).
+    func applicationWillTerminate(_ notification: Notification) {
+        let uptime = Date().timeIntervalSince(launchedAt)
+        NotchLogger.shared.log(
+            "info",
+            "[lifecycle] terminating uptime=\(String(format: "%.1f", uptime))s pid=\(ProcessInfo.processInfo.processIdentifier)"
+        )
+        // Best-effort: tear down notch controller resources before the
+        // process exits so timers/monitors don't leak across a quick
+        // relaunch.
+        NotchController.shared.shutdown()
     }
 }
 

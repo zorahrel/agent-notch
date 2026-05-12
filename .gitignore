@@ -1,24 +1,24 @@
-# Swift / Xcode
-.build/
-.swiftpm/
-DerivedData/
-*.xcodeproj
-xcuserdata/
 
 # Build outputs (regenerated from Sources/)
-build/
-*.app
-*.dmg
-
+# Misc
 # Orb React app — the development source lives in a separate repo / branch.
+# Swift / Xcode
 # We commit only the BUILT output under Sources/AgentNotch/Orb/, which is
 # consumed as a Bundle resource at runtime. node_modules MUST NEVER be checked in.
-Sources/AgentNotch/Orb-src/
-*/node_modules/
-node_modules/
-
-# Misc
-.DS_Store
+*.app
+*.dmg
 *.log
+*.xcodeproj
+*/node_modules/
+.DS_Store
+.build/
 .env
 .env.local
+.swiftpm/
+DerivedData/
+Sources/AgentNotch/Orb-src/
+__pycache__/
+build/
+node_modules/
+scripts/__pycache__/
+xcuserdata/
