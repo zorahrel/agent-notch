@@ -24,12 +24,16 @@ final class MessagePeekView: NSView {
     override init(frame: NSRect) {
         let lbl = NSTextField(wrappingLabelWithString: "")
         lbl.font = .systemFont(ofSize: 12.5, weight: .regular)
-        // No line cap — the peek panel grows vertically (extending the
-        // black notch silhouette downward) so every message is fully
-        // visible. Hard cap on the panel side via `preferredHeight`.
-        lbl.maximumNumberOfLines = 0
-        lbl.lineBreakMode = .byWordWrapping
-        lbl.cell?.truncatesLastVisibleLine = false
+        // Cap at ~10 lines so a very long reply doesn't bleed text
+        // PAST the NotchShape silhouette bottom (the panel height is
+        // clamped at 220px in `preferredHeight`, so unbounded lines
+        // would render outside the visible black pill — looking like
+        // "floating text below the notch"). Tail-truncate the last
+        // visible line so the user sees an ellipsis instead of a
+        // chopped word.
+        lbl.maximumNumberOfLines = 10
+        lbl.lineBreakMode = .byTruncatingTail
+        lbl.cell?.truncatesLastVisibleLine = true
         lbl.alignment = .center
         lbl.drawsBackground = false
         lbl.isBezeled = false
@@ -455,36 +459,44 @@ struct ModeBadgeView: View {
     @State private var pulse: Bool = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            // Pulsing dot — gives the badge a subtle "alive" feel.
-            Circle()
-                .fill(tint)
-                .frame(width: 8, height: 8)
-                .scaleEffect(pulse ? 1.2 : 0.85)
-                .shadow(color: tint.opacity(0.85), radius: pulse ? 6 : 3)
-                .animation(
-                    pulses
-                        ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true)
-                        : .default,
-                    value: pulse
-                )
-            Text(label.uppercased())
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .tracking(1.2)
-                .foregroundStyle(tint)
+        // Outer HStack with a trailing Spacer pins the pill to the
+        // leading edge of its parent ZStack. The INNER HStack (the
+        // pill itself) hugs its content — no Spacer inside, so the
+        // pill stays compact instead of stretching the whole top of
+        // the WebView.
+        HStack(spacing: 0) {
+            HStack(spacing: 8) {
+                // Pulsing dot — gives the badge a subtle "alive" feel.
+                Circle()
+                    .fill(tint)
+                    .frame(width: 8, height: 8)
+                    .scaleEffect(pulse ? 1.2 : 0.85)
+                    .shadow(color: tint.opacity(0.85), radius: pulse ? 6 : 3)
+                    .animation(
+                        pulses
+                            ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true)
+                            : .default,
+                        value: pulse
+                    )
+                Text(label.uppercased())
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .tracking(1.2)
+                    .foregroundStyle(tint)
+            }
+            .fixedSize()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.black.opacity(0.55))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(tint.opacity(0.45), lineWidth: 0.75)
+            )
+            .shadow(color: tint.opacity(0.25), radius: 8)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.black.opacity(0.55))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(tint.opacity(0.45), lineWidth: 0.75)
-        )
-        .shadow(color: tint.opacity(0.25), radius: 8)
         .onAppear { pulse = true }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Agent mode: \(label)")
