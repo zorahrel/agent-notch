@@ -9,6 +9,13 @@ final class HTTPBackendTests: XCTestCase {
         super.setUp()
         StubURLProtocol.responses.removeAll()
         StubURLProtocol.recordedRequests.removeAll()
+        // `recordedBodies` is part of the same global stub state as
+        // `recordedRequests`; without clearing it here, leftovers
+        // from the previous test (e.g. testLoadAndSavePrefs's
+        // `{"density":"comfortable"}`) leak into the next test's
+        // assertions. CI happened to run the tests in an order where
+        // this never bit, but local runs hit it.
+        StubURLProtocol.recordedBodies.removeAll()
     }
 
     // MARK: - sendMessage
