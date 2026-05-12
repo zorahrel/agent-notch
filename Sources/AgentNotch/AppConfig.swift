@@ -110,12 +110,22 @@ public struct AppConfig: Codable, Equatable {
 
     // MARK: - Environment overrides
 
-    /// Returns a copy with any matching env-var overrides applied. Kept
-    /// pure so callers can test the merge logic without touching disk.
+    /// Returns a copy with any matching env-var overrides applied.
+    /// Logs a warning when the env value differs from the file value
+    /// so the user notices when a leftover `launchctl setenv` setting
+    /// is silently winning over their edited `config.json`. (Default-
+    /// value first launches don't log — the two values match by
+    /// construction.) Kept pure-ish: only side effect is the log.
     func applyingEnvironmentOverrides() -> AppConfig {
         var copy = self
         let env = ProcessInfo.processInfo.environment
         if let override = env["AGENT_NOTCH_BACKEND_URL"], !override.isEmpty {
+            if override != self.backendURL {
+                NotchLogger.shared.log(
+                    "warn",
+                    "[config] AGENT_NOTCH_BACKEND_URL env var (\(override)) is overriding config.json value (\(self.backendURL)); unset the env var or edit ~/Library/LaunchAgents to make the file value win"
+                )
+            }
             copy.backendURL = override
         }
         return copy

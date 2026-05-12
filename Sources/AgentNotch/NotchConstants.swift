@@ -30,8 +30,22 @@ public enum NotchEndpoints {
     /// own first-run write).
     ///
     /// Safe to call from any thread — the box is lock-protected.
-    public static func refresh(host newHost: String) {
+    /// Returns the value that ended up cached: the passed-in URL on
+    /// success, the previous cached value on validation failure. We
+    /// validate by re-parsing through `URL(string:)` so callers see
+    /// the same parsing path the per-endpoint accessors take. A
+    /// malformed URL is logged and ignored.
+    @discardableResult
+    public static func refresh(host newHost: String) -> String {
+        guard validate(host: newHost) else {
+            NotchLogger.shared.log(
+                "warn",
+                "[endpoints] refused refresh: malformed backend URL \(newHost.isEmpty ? "<empty>" : newHost); keeping previous value"
+            )
+            return hostBox.value
+        }
         hostBox.value = newHost
+        return newHost
     }
 
     /// MainActor-isolated convenience: re-read from disk and update.
@@ -41,7 +55,29 @@ public enum NotchEndpoints {
     /// with `AppConfigStore`'s save path.
     @MainActor
     public static func reloadFromDisk() {
-        hostBox.value = AppConfig.load().backendURL
+        let loaded = AppConfig.load().backendURL
+        if validate(host: loaded) {
+            hostBox.value = loaded
+        } else {
+            NotchLogger.shared.log(
+                "warn",
+                "[endpoints] reloadFromDisk skipped: config.json has malformed backendURL \(loaded.isEmpty ? "<empty>" : loaded); keeping in-memory value"
+            )
+        }
+    }
+
+    /// Quick sanity check on a candidate host string. Rejects empty
+    /// strings, malformed URLs, and schemes we don't support. Doesn't
+    /// reach the network — the goal is to catch obvious typos before
+    /// they reach `URL(string:)!` force-unwraps downstream.
+    private static func validate(host candidate: String) -> Bool {
+        guard !candidate.isEmpty,
+              let url = URL(string: candidate),
+              let scheme = url.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              url.host != nil
+        else { return false }
+        return true
     }
 
     /// Thread-safe holder so `host` reads from any thread are well-
