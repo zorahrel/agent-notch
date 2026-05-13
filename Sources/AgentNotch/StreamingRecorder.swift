@@ -53,16 +53,29 @@ final class StreamingRecorder {
     /// RT thread.
     private let writeQueue = DispatchQueue(label: "jarvis.streamrec.write", qos: .userInitiated)
 
-    /// RMS below which a frame counts as silence. 0.005 is roughly quiet
-    /// room-tone at normal mic gain; louder rooms need more. Tune with
-    /// NotchLogger output if false-silence triggers are too eager.
-    private let silenceThreshold: Float = 0.006
-    /// Continuous silence needed to call `onSilenceDetected`. Bumped from
-    /// 0.7s → 1.5s on user feedback ("non mi dà neanche il tempo di finire
-    /// bene la frase o il pensiero"). Long pauses between thoughts are
-    /// natural in dictation; auto-stop should be patient enough to
-    /// survive them.
-    private let silenceSeconds: Double = 1.5
+    /// RMS below which a frame counts as silence. 0.006 was tuned for
+    /// the 3-channel built-in MacBook mic; on the 1-channel Voice-
+    /// Isolated input (which has a higher residual noise floor) the
+    /// threshold was never crossed, so silence detection never fired
+    /// and the mic stayed open until mouse-out. 0.020 is the floor
+    /// across both modes — high enough to ignore typical ambient
+    /// noise, low enough to register a soft "ehm" as voice.
+    private let silenceThreshold: Float = 0.020
+
+    /// Hard upper bound on a single recording session. If the silence
+    /// detector somehow never fires (mic stuck open in a noisy room,
+    /// VAD broken, etc.) the recorder still bails after this many
+    /// seconds. Prevents the "stuck in LISTENING forever" symptom.
+    private let maxRecordingSeconds: Double = 12.0
+    private var recordingStartedAt: TimeInterval = 0
+    /// Continuous silence needed to call `onSilenceDetected`. History:
+    /// 0.7s → 1.5s on early feedback ("non mi dà neanche il tempo di
+    /// finire la frase"), then back down once we saw 1.5s made the
+    /// LISTENING badge linger after the user was clearly done.
+    /// 0.8s is the comfortable middle: long enough to survive a pause
+    /// for breath, short enough that the UI promptly hands off to
+    /// WORKING / RESPONDING.
+    private let silenceSeconds: Double = 0.8
 
     private var silenceStart: TimeInterval = 0
     /// Toggled by NotchController via setAssistantSpeaking() while the assistant's
@@ -123,6 +136,7 @@ final class StreamingRecorder {
         self.silenceStart = 0
         self.hadVoice = false
         self.didFireSilence = false
+        self.recordingStartedAt = Date().timeIntervalSince1970
         self.lastLevelEmitAt = 0
         self.writeFailure = nil
 
@@ -347,9 +361,10 @@ final class StreamingRecorder {
     // MARK: - VAD
 
     /// Forced silence trigger from outside (e.g. Silero VAD in the WebView
-    /// reports user speech end). Skips the RMS-based 1.5s silence threshold
-    /// for snappier turn-taking. Idempotent — only fires once per session,
-    /// matching the contract of processFrameRMS's natural silence detection.
+    /// reports user speech end). Skips the RMS-based `silenceSeconds`
+    /// dwell for snappier turn-taking. Idempotent — only fires once per
+    /// session, matching the contract of processFrameRMS's natural
+    /// silence detection.
     func flushOnUserSilence() {
         guard hadVoice, !didFireSilence else { return }
         didFireSilence = true
@@ -364,6 +379,17 @@ final class StreamingRecorder {
         if now - lastLevelEmitAt >= 0.1 {
             lastLevelEmitAt = now
             onPartial?(rms)
+        }
+
+        // Hard upper bound: regardless of RMS, force-stop after
+        // `maxRecordingSeconds`. Catches the case where ambient noise
+        // sits just above silenceThreshold and the normal silence
+        // detection never fires.
+        if !didFireSilence && recordingStartedAt > 0 && now - recordingStartedAt >= maxRecordingSeconds {
+            didFireSilence = true
+            hadVoice = hadVoice || rms > 0  // anything we captured counts
+            onSilenceDetected?()
+            return
         }
 
         if rms > silenceThreshold {

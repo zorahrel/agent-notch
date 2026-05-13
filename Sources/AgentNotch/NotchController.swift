@@ -18,6 +18,12 @@ final class NotchController: ObservableObject {
     @Published var activeCount: Int = 0
     @Published var pendingCount: Int = 0
     @Published private(set) var state: NotchAgentState = .idle
+
+    /// `true` while the streaming recorder is capturing audio. Mirrors
+    /// `streamRecorder.isRunning` because that property isn't itself
+    /// @Published — surface it here so the UI (ModeBadgeView) can
+    /// react. Toggled by `startStreamingVoice` / `stopStreamingVoice`.
+    @Published private(set) var isListening: Bool = false
     @Published private(set) var isExpanded: Bool = false
     @Published private(set) var focus: ExpandFocus = .chat
 
@@ -557,6 +563,10 @@ final class NotchController: ObservableObject {
             web.isInspectable = true
         }
         web.navigationDelegate = coordinator
+        // Also act as UI delegate so we can deny mic/camera capture
+        // requests the orb's VAD makes — see NotchWebBridge for the
+        // rationale (audio session conflict with the Swift recorder).
+        web.uiDelegate = coordinator
 
         // Prefer the router HTTP endpoint — WKWebView's ES module loader
         // rejects cross-file imports from `file://` origins even with
@@ -632,6 +642,18 @@ final class NotchController: ObservableObject {
     ///    the screenshot). This was the most user-visible bug pre-fix.
     /// 3. Track the flag publicly so the hover-dwell arming code can refuse
     ///    to start a new capture while TTS is playing.
+    /// Called by the WebBridge when the assistant's TTS playback ends.
+    /// If we're inside a continuous-call session AND the user is still
+    /// hovering, re-arm the mic now so they can reply right away —
+    /// without this hop the user has to wait for the post-silence
+    /// re-arm timer (1.2 s) to fire.
+    func rearmAfterTTS() {
+        guard inContinuousCall else { return }
+        guard !streamRecorder.isRunning else { return }
+        guard isHovering else { return }
+        startStreamingVoice()
+    }
+
     func setAssistantSpeaking(_ speaking: Bool) {
         // Three-layer echo defense (any one is in theory sufficient, but they
         // catch different leak paths and add up to robust silence):
@@ -863,7 +885,10 @@ final class NotchController: ObservableObject {
     /// ship the utterance and re-arm the mic instead of ending the call.
     /// `didSet` logs every flip so we can trace "the call closed itself"
     /// reports back to the exact code path that cleared the flag.
-    private var inContinuousCall: Bool = false {
+    // Exposed `internal` (not private) so the WebBridge can read it
+    // from the `audioLifecycle end` handler to decide whether to
+    // re-arm the mic immediately after TTS playback ends.
+    var inContinuousCall: Bool = false {
         didSet {
             if oldValue != inContinuousCall {
                 NotchLogger.shared.log("info", "[call] inContinuousCall \(oldValue) → \(inContinuousCall)")
@@ -1128,6 +1153,7 @@ final class NotchController: ObservableObject {
         // partial-level event in this session reliably triggers the
         // "listening → voiced" CSS class swap.
         lastVoicedState = false
+        isListening = true
         pushMicState(on: true)
         // Show the bottom-right cancel affordance — quarter-circle with X
         // that scales toward the cursor as it nears the corner.
@@ -1214,6 +1240,7 @@ final class NotchController: ObservableObject {
         let url = streamRecorder.stop()
         let appleText = transcriber.isRunning ? transcriber.stop() : ""
         lastStreamStopAt = Date().timeIntervalSince1970
+        isListening = false
         pushMicState(on: false)
         hideCancelAffordance()
         evalJS("window.__notchVoiceLiveEnd && window.__notchVoiceLiveEnd();")
@@ -1260,8 +1287,23 @@ final class NotchController: ObservableObject {
         // next start — restarting too fast trips a CoreAudio reset.
         if inContinuousCall {
             Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .milliseconds(250))
+                // Brief "I heard you" gap before re-arming the mic.
+                // 600ms is short enough that the user perceives the
+                // hand-off (LISTENING → WORKING/RESPONDING → LISTENING)
+                // without feeling like the conversation paused. The
+                // re-arm path also waits for TTS to finish (via the
+                // assistantAudioPlaying guard below), so this only
+                // controls the gap when the assistant didn't speak.
+                try? await Task.sleep(for: .milliseconds(600))
                 guard let self, self.inContinuousCall, !self.streamRecorder.isRunning else { return }
+                // Skip re-arm while the assistant is still talking —
+                // don't capture our own TTS, and keep the visual
+                // state coherent (badge shows RESPONDING). The flag
+                // is cleared by the WebView `audioLifecycle end` message.
+                if self.assistantAudioPlaying {
+                    NotchLogger.shared.log("info", "[voice] re-arm deferred — assistant speaking")
+                    return
+                }
                 NotchLogger.shared.log("info", "[voice] continuous-call re-arm")
                 self.startStreamingVoice()
             }

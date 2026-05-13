@@ -24,12 +24,16 @@ final class MessagePeekView: NSView {
     override init(frame: NSRect) {
         let lbl = NSTextField(wrappingLabelWithString: "")
         lbl.font = .systemFont(ofSize: 12.5, weight: .regular)
-        // No line cap — the peek panel grows vertically (extending the
-        // black notch silhouette downward) so every message is fully
-        // visible. Hard cap on the panel side via `preferredHeight`.
-        lbl.maximumNumberOfLines = 0
-        lbl.lineBreakMode = .byWordWrapping
-        lbl.cell?.truncatesLastVisibleLine = false
+        // Cap at ~10 lines so a very long reply doesn't bleed text
+        // PAST the NotchShape silhouette bottom (the panel height is
+        // clamped at 220px in `preferredHeight`, so unbounded lines
+        // would render outside the visible black pill — looking like
+        // "floating text below the notch"). Tail-truncate the last
+        // visible line so the user sees an ellipsis instead of a
+        // chopped word.
+        lbl.maximumNumberOfLines = 10
+        lbl.lineBreakMode = .byTruncatingTail
+        lbl.cell?.truncatesLastVisibleLine = true
         lbl.alignment = .center
         lbl.drawsBackground = false
         lbl.isBezeled = false
@@ -387,15 +391,141 @@ struct NotchExpandedView: View {
                 .frame(maxWidth: .infinity)
 
             HStack(alignment: .top, spacing: 6) {
-                SharedWebContainer(webView: controller.webView)
-                    .frame(width: 420, height: 540)
-                    .background(.clear)
-                    .cornerRadius(22)
+                ZStack(alignment: .topLeading) {
+                    SharedWebContainer(webView: controller.webView)
+                        .frame(width: 420, height: 540)
+                        .background(.clear)
+                        .cornerRadius(22)
+
+                    // Mode badge — floats over the top-left corner of
+                    // the webview, so it can't push or clip any other
+                    // surface. Explicit state indicator (listening /
+                    // working / responding / standby) was the user's
+                    // top UX gripe. `isListening` overrides the agent
+                    // state — when the mic is open we want the user
+                    // to know that NOW, even if the backend says idle.
+                    ModeBadgeView(state: controller.state, listening: controller.isListening)
+                        .padding(.horizontal, 10)
+                        .padding(.top, 8)
+                        .allowsHitTesting(false)
+                }
 
                 // Right peek — live sessions list with status badges.
                 SessionsSidebarView(sessions: $sessions)
                     .frame(width: 160)
             }
+        }
+        // Inset the entire expanded surface BELOW the physical notch
+        // cutout. macOS reports `safeAreaInsets.top ≈ 32` on
+        // notched displays; reserving ~40 px gives a comfortable gap
+        // so the first chat row / sidebar header / todo strip never
+        // disappear behind the camera housing.
+        .padding(.top, notchTopInset)
+    }
+
+    /// Vertical inset to clear the physical notch hardware. Uses the
+    /// system-reported safe-area top inset when available, falling
+    /// back to a sane default (38) when the panel is composed on a
+    /// non-notched screen for some reason.
+    private var notchTopInset: CGFloat {
+        let screens = NSScreen.screens
+        let notch = screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.main
+        let raw = notch?.safeAreaInsets.top ?? 32
+        // Round up + add a 6 px breathing margin so the first row of
+        // content has a hairline of space between it and the notch.
+        return ceil(raw) + 6
+    }
+}
+
+// MARK: - Mode badge
+
+/// Explicit visual indicator of the agent's high-level state. Sits at
+/// the top of the expanded notch panel so the user can tell at a
+/// glance whether the agent is:
+///
+///   - **standby** — idle, waiting for input
+///   - **listening** — mic open, recording user speech
+///   - **working** — backend is thinking / running a tool
+///   - **responding** — assistant is streaming a reply
+///
+/// Drives off `NotchController.state` (NotchAgentState), which the
+/// SSE bus pushes via `state.change` events.
+struct ModeBadgeView: View {
+    let state: NotchAgentState
+    /// True while the streaming recorder is open — wins over `state`
+    /// so the user sees "LISTENING" the moment hover-record arms.
+    let listening: Bool
+
+    @State private var pulse: Bool = false
+
+    var body: some View {
+        // Outer HStack with a trailing Spacer pins the pill to the
+        // leading edge of its parent ZStack. The INNER HStack (the
+        // pill itself) hugs its content — no Spacer inside, so the
+        // pill stays compact instead of stretching the whole top of
+        // the WebView.
+        HStack(spacing: 0) {
+            HStack(spacing: 8) {
+                // Pulsing dot — gives the badge a subtle "alive" feel.
+                Circle()
+                    .fill(tint)
+                    .frame(width: 8, height: 8)
+                    .scaleEffect(pulse ? 1.2 : 0.85)
+                    .shadow(color: tint.opacity(0.85), radius: pulse ? 6 : 3)
+                    .animation(
+                        pulses
+                            ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true)
+                            : .default,
+                        value: pulse
+                    )
+                Text(label.uppercased())
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .tracking(1.2)
+                    .foregroundStyle(tint)
+            }
+            .fixedSize()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.black.opacity(0.55))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(tint.opacity(0.45), lineWidth: 0.75)
+            )
+            .shadow(color: tint.opacity(0.25), radius: 8)
+            Spacer(minLength: 0)
+        }
+        .onAppear { pulse = true }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Agent mode: \(label)")
+    }
+
+    private var label: String {
+        if listening { return "listening" }
+        switch state {
+        case .idle:       return "standby"
+        case .thinking:   return "working"
+        case .responding: return "responding"
+        }
+    }
+
+    private var tint: Color {
+        if listening { return Color(red: 0.32, green: 0.74, blue: 0.96) }  // sky blue
+        switch state {
+        case .idle:       return Color.gray
+        case .thinking:   return Color(red: 0.95, green: 0.62, blue: 0.18)  // amber
+        case .responding: return Color(red: 0.34, green: 0.80, blue: 0.55)  // green
+        }
+    }
+
+    /// Whether the dot should breathe. Standby = still. Active = pulse.
+    private var pulses: Bool {
+        if listening { return true }
+        switch state {
+        case .idle: return false
+        default:    return true
         }
     }
 }

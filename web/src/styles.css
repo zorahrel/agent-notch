@@ -108,8 +108,11 @@
     }
     .chat-log:empty::after {
       content: "Scrivi qualcosa a Jarvis.";
-      color: rgba(255,255,255,0.25);
-      font-size: 11px;
+      /* Was opacity 0.25 + 11px — both below WCAG (contrast and size).
+         0.50 + 12px brings the empty hint above 4.5:1 on the dark
+         canvas while keeping the muted "ghost" feel. */
+      color: rgba(255,255,255,0.50);
+      font-size: 12px;
       padding: 12px 4px;
       text-align: center;
     }
@@ -187,7 +190,11 @@
       margin-left: auto;
       padding: 1px 6px;
       font-family: var(--font-mono);
-      font-size: 9.5px;
+      /* Was 9.5px — below the 12px readable-min, especially in a
+         monospaced face on a tinted background. 10.5px is the
+         smallest that still fits two chips on one bubble line on
+         a 14" notch geometry. */
+      font-size: 10.5px;
       font-variant-numeric: tabular-nums;
       letter-spacing: 0.02em;
       color: rgba(255, 184, 77, 0.75);
@@ -242,7 +249,9 @@
        flow. Two flavors with the same shape. */
     .timing-strip {
       font-family: var(--font-mono);
-      font-size: 9px;
+      /* Was 9px — too small for at-a-glance reading. 10px keeps the
+         strip compact yet legible. */
+      font-size: 10px;
       color: rgba(242, 243, 245, 0.45);
       padding: 0 4px;
       margin-top: -3px;
@@ -253,7 +262,10 @@
     }
     .timing-strip.user { align-self: flex-end; }
     .timing-strip.assistant { align-self: flex-start; }
-    .timing-strip .seg-label { color: rgba(242, 243, 245, 0.30); margin-right: 2px; }
+    /* Was opacity 0.30 — contrast ~2.5:1 vs the dark canvas, below WCAG AA.
+       0.60 lifts it just above 4.5:1 while keeping the label visually
+       subordinate to the value. */
+    .timing-strip .seg-label { color: rgba(242, 243, 245, 0.60); margin-right: 2px; }
     .timing-strip .seg-val { color: rgba(255, 184, 77, 0.85); }
     .timing-strip .seg-model {
       color: var(--accent);
@@ -347,7 +359,10 @@
       position: absolute;
       bottom: 8px; right: 12px;
       font-family: var(--font-mono);
-      font-size: 9px;
+      /* Was 9px uppercase — unreadable under stress (the very moment
+         the user is trying to abort). 11px keeps the strip compact
+         but legible. */
+      font-size: 11px;
       letter-spacing: 0.1em;
       text-transform: uppercase;
       color: rgba(255, 120, 120, 0.95);
@@ -518,7 +533,9 @@
     /* Model-cycle button — same pill shape as toggles but with the current
        model id displayed inside. Clicks cycle opus → sonnet → haiku → opus. */
     .toggle.model-cycle {
-      font-size: 9px;
+      /* Aligned with the other toggles (10px) for visual consistency
+         and to clear the WCAG min-size threshold. */
+      font-size: 10px;
       padding: 3px 8px;
       letter-spacing: 0.06em;
       text-transform: uppercase;

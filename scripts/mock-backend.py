@@ -36,11 +36,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import mimetypes
+import os
 import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
+
+# Repo-relative path to the BUILT orb assets (notch.html + JS/CSS
+# bundles + VAD wasm + vendor libs). The mock serves these directly
+# so the WKWebView gets the real React app instead of a placeholder
+# div. Falls back to the inline placeholder if the directory is
+# absent (running the script standalone).
+ORB_DIR = (Path(__file__).resolve().parent.parent / "Sources" / "AgentNotch" / "Orb").resolve()
 
 # ─── Fake state ─────────────────────────────────────────────────────────
 
@@ -66,6 +76,40 @@ FAKE_TODOS: list[dict[str, Any]] = [
     {"id": "T-2", "title": "Add subprocess transport",  "pid": 1001, "phase": "build"},
     {"id": "T-3", "title": "Sign the .app bundle",      "pid": None, "phase": None},
 ]
+
+# ─── SSE broadcast queue ────────────────────────────────────────────────
+#
+# POST /api/notch/send must trigger an SSE `message.out` echo so the
+# user sees a response in the chat — otherwise the app feels "deaf"
+# even when the mic picked up the message correctly.
+#
+# Each active SSE connection registers its OWN inbound queue. The
+# send handler appends events to every queue so all connected clients
+# (real app + curl test + dev tools) see the same broadcast. Previous
+# "single shared queue + drain" lost events to whichever client
+# drained first.
+SSE_CLIENTS_LOCK = threading.Lock()
+SSE_CLIENT_QUEUES: list[list[dict[str, Any]]] = []
+
+def register_sse_client() -> list[dict[str, Any]]:
+    """Create a new per-client queue and return it."""
+    q: list[dict[str, Any]] = []
+    with SSE_CLIENTS_LOCK:
+        SSE_CLIENT_QUEUES.append(q)
+    return q
+
+def unregister_sse_client(q: list[dict[str, Any]]) -> None:
+    with SSE_CLIENTS_LOCK:
+        try:
+            SSE_CLIENT_QUEUES.remove(q)
+        except ValueError:
+            pass
+
+def enqueue_event(event_type: str, data: dict[str, Any]) -> None:
+    """Broadcast an event to every registered client queue."""
+    with SSE_CLIENTS_LOCK:
+        for q in SSE_CLIENT_QUEUES:
+            q.append({"type": event_type, "data": data})
 
 PLACEHOLDER_ORB_HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><title>orb (mock)</title>
@@ -113,6 +157,59 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0") or "0")
         return self.rfile.read(length) if length > 0 else b""
 
+    def _serve_orb(self, path: str) -> None:
+        """Serve files from the built Orb resources directory.
+
+        Strips the `/notch/orb/` prefix; bare `/notch/orb` (no slash,
+        no trailing path) maps to `notch.html`. Anything outside
+        ORB_DIR is refused with 403 to dodge path-traversal attempts.
+        Falls back to the inline placeholder if the resource is
+        missing.
+        """
+        rel = path[len("/notch/orb"):].lstrip("/")
+        if rel == "":
+            rel = "notch.html"
+        # Normalise + guard against `..` escape.
+        target = (ORB_DIR / rel).resolve()
+        try:
+            target.relative_to(ORB_DIR)
+        except ValueError:
+            self.send_response(403)
+            self.end_headers()
+            return
+        if not target.is_file():
+            # Resource missing — fall back to a clearly visible
+            # placeholder so the user knows the WebView is alive but
+            # the orb sources weren't found.
+            body = PLACEHOLDER_ORB_HTML.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        # Real file → infer Content-Type from extension. Fall back
+        # to octet-stream so unknown WASM/font types still load.
+        ctype, _ = mimetypes.guess_type(target.name)
+        if ctype is None:
+            if target.suffix == ".wasm":
+                ctype = "application/wasm"
+            elif target.suffix == ".woff":
+                ctype = "font/woff"
+            elif target.suffix == ".woff2":
+                ctype = "font/woff2"
+            elif target.suffix == ".mjs":
+                ctype = "application/javascript"
+            else:
+                ctype = "application/octet-stream"
+        data = target.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(data)
+
     # ── GET ────────────────────────────────────────────────────────────
 
     def do_GET(self) -> None:
@@ -125,7 +222,26 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(200, FAKE_SESSIONS)
 
         if path == "/api/notch/prefs":
-            return self._send_json(200, {})
+            # Default prefs returned to fresh clients. hoverRecord ON
+            # by default so the user can talk to the notch without
+            # first finding and toggling the setting buried in the
+            # toolbar.
+            return self._send_json(200, {
+                "hoverRecord": True,
+                "mute": False,
+                "model": "sonnet",
+            })
+
+        if path.startswith("/api/notch/history"):
+            # React app fetches chat history on mount. Mock with a
+            # couple of seed messages so the chat log isn't blank.
+            return self._send_json(200, {
+                "messages": [
+                    {"role": "assistant", "text": "Mock backend ready. Try typing something.", "ts": int(time.time() * 1000) - 60000},
+                    {"role": "user", "text": "ciao", "ts": int(time.time() * 1000) - 30000},
+                    {"role": "assistant", "text": "Ricevuto. Sto pensando... (mock response)", "ts": int(time.time() * 1000) - 28000},
+                ]
+            })
 
         if path.startswith("/api/todos/"):
             todo_id = path.split("/api/todos/", 1)[1].split("/")[0]
@@ -135,13 +251,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(200, todo)
 
         if path.startswith("/notch/orb"):
-            body = PLACEHOLDER_ORB_HTML.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
+            return self._serve_orb(path)
 
         # Browser auto-fetches for favicon / apple-touch-icon. Return
         # 204 (no content) instead of 404 so the mock log doesn't fill
@@ -191,6 +301,20 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 msg = ""
             sys.stderr.write(f"[mock] send: {msg!r}\n")
+            # Echo back a fake assistant response over SSE so the user
+            # actually sees the agent "reply" instead of an inert chat.
+            # Wrap in a tiny state.change + delay so the orb visually
+            # transitions through thinking → responding → idle.
+            def fake_response(text: str) -> None:
+                time.sleep(0.4)
+                enqueue_event("state.change", {"state": "thinking"})
+                time.sleep(0.6)
+                enqueue_event("state.change", {"state": "responding"})
+                reply = f"(mock) Ho ricevuto: «{text}». Risponderei qui, ma sono un backend finto."
+                enqueue_event("message.out", {"text": reply, "from": "assistant"})
+                time.sleep(0.6)
+                enqueue_event("state.change", {"state": "idle"})
+            threading.Thread(target=fake_response, args=(msg,), daemon=True).start()
             return self._send_204()
 
         if path == "/api/notch/abort":
@@ -256,6 +380,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
 
+        # Each SSE connection gets its own pending queue so a /send
+        # POST gets fanned out to every connected client (not raced).
+        client_queue = register_sse_client()
+
         def send(event_type: str, data: dict[str, Any]) -> None:
             try:
                 line = "data: " + json.dumps({"type": event_type, "data": data}) + "\n\n"
@@ -278,10 +406,16 @@ class Handler(BaseHTTPRequestHandler):
                 "topThree": FAKE_TODOS,
             })
 
-            # Periodic heartbeat: every 5 s rotate session statuses
-            # AND emit a state.change / message.in so more of the HUD
-            # surface gets exercised (orb aura, peek bubble).
+            # Periodic heartbeat. Two clocks:
+            #   - Every 5 s: rotate the first session's status so the
+            #     sidebar shows colour reactivity (cheap, useful).
+            #   - Every 60 s: rotate the high-level agent state +
+            #     emit ONE message.in so the chat / peek bubble has
+            #     periodic life without spamming the same line on
+            #     every tick (the 5-second cadence felt like the
+            #     mock was screaming at you).
             flip = 0
+            tick = 0
             states = ["idle", "thinking", "responding"]
             statuses = ["working", "tool_pending", "awaiting_user_input"]
             fake_messages = [
@@ -290,7 +424,18 @@ class Handler(BaseHTTPRequestHandler):
                 "Devo confermare prima di procedere.",
             ]
             while True:
-                time.sleep(5)
+                # Poll this client's pending queue every 200 ms so
+                # async /api/notch/send replies reach the client fast.
+                for _ in range(25):  # 25 * 0.2 = 5 s, then heartbeat
+                    time.sleep(0.2)
+                    # Drain the per-client queue under the lock so
+                    # the POST thread can't append while we iterate.
+                    with SSE_CLIENTS_LOCK:
+                        pending = list(client_queue)
+                        client_queue.clear()
+                    for evt in pending:
+                        send(evt["type"], evt["data"])
+                tick += 1
                 flip = (flip + 1) % 3
                 FAKE_SESSIONS[0]["status"] = statuses[flip]
                 send("sessions:update", {
@@ -298,14 +443,16 @@ class Handler(BaseHTTPRequestHandler):
                     "ts": int(time.time() * 1000),
                     "sessions": FAKE_SESSIONS,
                 })
-                # Rotate the high-level agent state — drives the orb's
-                # idle/thinking/responding visual.
-                send("state.change", {"state": states[flip]})
-                # Periodic incoming message so the peek bubble has
-                # something to show.
-                send("message.in", {"text": fake_messages[flip]})
+                # state.change every 15 s (every 3rd tick) so the
+                # ModeBadge cycles visibly. Removed periodic
+                # message.in spam — replies now come from real
+                # POST /api/notch/send echos via enqueue_event.
+                if tick % 3 == 0:
+                    send("state.change", {"state": states[flip]})
         except (BrokenPipeError, ConnectionResetError):
             sys.stderr.write("[mock] SSE client disconnected\n")
+        finally:
+            unregister_sse_client(client_queue)
 
 
 # ─── Entry point ────────────────────────────────────────────────────────
