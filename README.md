@@ -41,7 +41,7 @@ It started as Phase 2 of an internal multi-channel router (Jarvis). Extracted be
 
 - **Jarvis Router** — current default backend. HTTP at `localhost:3340`.
 - **Topics App** — future consumer. Will run its own backend.
-- **Standalone with `agent-conductor`** — planned for v0.2. The CLI in [`agent-conductor`](https://github.com/zorahrel/agent-conductor) will gain a `watch` subcommand that streams JSON-Lines on stdout; this app will spawn it as a subprocess. Zero HTTP, zero ports, zero config.
+- **Standalone with `agent-conductor`** — *on hold.* The plan was a `watch` subcommand streaming JSON-Lines on stdout, spawned as a subprocess: zero HTTP, zero ports, zero config. [`agent-conductor`](https://github.com/zorahrel/agent-conductor) has been archived since June 2026, so that subcommand is not coming from there. The design still holds for any CLI willing to emit the same stream.
 
 ## Try it in 30 seconds (no backend required)
 
