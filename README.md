@@ -5,6 +5,16 @@
 
   **Live AI coding sessions, in your MacBook Pro dynamic notch.**
 
+  > ### ⚠️ Not maintained
+  >
+  > Last substantive work: May 2026. The HUD works and the code is here to read
+  > or fork, but nothing new is coming: the same information is already served by
+  > the [Jarvis router dashboard](https://github.com/zorahrel/jarvis-claudecode)
+  > on `:3340`, and a second surface for it was not worth keeping alive.
+  > The standalone mode also depended on
+  > [agent-conductor](https://github.com/zorahrel/agent-conductor), archived since
+  > June 2026.
+
   Always-on HUD over the macOS dynamic notch + menu-bar surface. Shows which sessions are awaiting your input, which are stuck on a tool call, and your top open todos — without flipping windows.
 
   <p>
